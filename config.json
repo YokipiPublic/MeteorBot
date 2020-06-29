@@ -13,6 +13,10 @@
   "max_matches": 100,
   "matchmaking_requirements": [
     2,
-    30000
+    21600000,
+    12,
+    1200000,
+    20,
+    0
   ]
 }

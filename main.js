@@ -648,8 +648,8 @@ async function case_pending(message, args, flags, guild, member) {
   const string_builder = [];
   string_builder.push('```');
   for (let i = 0; i < match_rows.length; i++) {
-    string_builder.push(`ID# ${match_rows[i].id.toString().padStart(6)} - ` +
-      `${match_rows[i].queue.name}: ` + 
+    string_builder.push(`ID# ${match_rows[i].id.toString().padStart(5)} - ` +
+      `${match_rows[i].queue.name.padEnd(24)}: ` + 
       `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`);
   }
   string_builder.push('```');
@@ -1139,7 +1139,8 @@ const make_match = async function(user1, elo1, user2, elo2) {
 
     // Notify matchmade players
     client.channels.cache.get(config.match_channel).send(
-        `Queue "${user1.queue.name}", Match ID \`${match.id}\`: ` +
+        `Match ID# \`${match.id.toString().padStart(5)}\` - ` +
+        `Queue \`${user1.queue.name.padEnd(24)}\`:` +
         `${client.users.cache.get(user1.user.discord_id)} ` +
         `${user1.user.amq_name} (${helper.what_elo(elo1)}) vs. ` +
         `${client.users.cache.get(user2.user.discord_id)} ` +
