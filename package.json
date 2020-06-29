@@ -1,0 +1,13 @@
+{
+  "name": "meteor-bot",
+  "version": "1.0.0",
+  "description": "AMQ Ladder Bot",
+  "main": "main.js",
+  "author": "Yokipi",
+  "dependencies": {
+    "discord.js": "^12.2.0",
+    "edmonds-blossom": "^1.0.0",
+    "sequelize": "^5.21.11",
+    "sqlite3": "^4.2.0"
+  }
+}
