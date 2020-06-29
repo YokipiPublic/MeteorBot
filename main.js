@@ -648,7 +648,8 @@ async function case_pending(message, args, flags, guild, member) {
   const string_builder = [];
   string_builder.push('```');
   for (let i = 0; i < match_rows.length; i++) {
-    string_builder.push(`${match_rows[i].queue.name}: ` + 
+    string_builder.push(`ID# ${match_rows[i].id.toString().padStart(6)} - ` +
+      `${match_rows[i].queue.name}: ` + 
       `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`);
   }
   string_builder.push('```');
@@ -1200,7 +1201,7 @@ const matchmake = async function(queue_name) {
     }
 
     // If user is new to queue, create user_rating entry
-    for (let i = 0; i < lfm_rows.length; i++)
+    for (let i = 0; i < lfm_rows.length; i++) {
       if (!(await lfm_rows[i].user.hasQueue(lfm_rows[i].queue))) {
         await lfm_rows[i].user.addQueue(lfm_rows[i].queue);
       }
