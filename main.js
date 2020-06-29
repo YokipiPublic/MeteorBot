@@ -42,6 +42,15 @@ async function case_register(message, args, flags, guild, member) {
       message.reply(`${args[0]} successfully registered. ` +
           'Please use `m!registerlist <List URL>` to have your list verified ' +
           'if you would like to participate in list formats. This can be done via DM.');
+    }).catch((e) => {
+      if (e.name === 'SequelizeUniqueConstraintError') {
+        if(e.fields.includes('amq_name')) {
+          return message.channel.send('This AMQ username is already registered.');
+        }
+      }
+      console.log(e.name);
+      console.log(e.message);
+      return message.channel.send('Error during registration.');
     });
 
   // If found, update it
@@ -308,7 +317,7 @@ async function case_leaderboard(message, args, flags, guild, member) {
   const rating_rows = await db.users.findAll({
     include: [{
       model: db.queues,
-      where: {name: args[0]},
+      where: {lowercase_name: args[0].toLowerCase()},
       through: {
         attributes: ['rating', 'wins', 'draws', 'losses']
       }
@@ -1191,11 +1200,11 @@ const matchmake = async function(queue_name) {
     }
 
     // If user is new to queue, create user_rating entry
-    await lfm_rows.forEach(async (row) => {
-      if (!(await row.user.hasQueue(row.queue))) {
-        await row.user.addQueue(row.queue);
+    for (let i = 0; i < lfm_rows.length; i++)
+      if (!(await lfm_rows[i].user.hasQueue(lfm_rows[i].queue))) {
+        await lfm_rows[i].user.addQueue(lfm_rows[i].queue);
       }
-    });
+    }
 
     // Get all users of queue, ordered by rating
     const rating_rows = await db.users.findAll({
@@ -1431,9 +1440,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
     });
   // If already queued, delete queue entry
   } else lfm_row.destroy();
-  if (lfm_row === null) setTimeout(matchmake, 10000, queue.name);
-  if (lfm_row === null) setTimeout(matchmake, 1210000, queue.name);
-  if (lfm_row === null) setTimeout(matchmake, 21610000, queue.name);
+  if (lfm_row === null) {
+    for (let i = 0; i < config.matchmaking_requirements.length; i+=2) {
+      setTimeout(matchmake, config.matchmaking_requirements[i+1] + 10000, queue.name);
+    }
+  }
   console.log(`${user.username} ${lfm_row === null ? 'queued to' : 'unqueued from'} `+
       `"${queue.name}"`);
   user.send(`You have been ${lfm_row === null ? 'queued to' : 'unqueued from'} ` +
