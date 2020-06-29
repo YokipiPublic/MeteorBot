@@ -22,7 +22,8 @@ err.default_messages = [
     'The dinosaurs had it coming.',
     'You want some of this? (ง\'̀-\'́)ง',
     'You\'ve seen a meteor shower before? (｡･･｡)',
-    'Help! I\'ve fallen and I can\'t get up!'
+    'Help! I\'ve fallen and I can\'t get up!',
+    ':miscF:'
     ];
 
 

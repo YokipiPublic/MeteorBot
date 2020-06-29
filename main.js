@@ -209,7 +209,7 @@ async function case_result(message, args, flags, guild, member) {
       result: 'PENDING'
     });
     update_best_player(match.queue.id, guild);
-    return message.channel.send(`Result for match ${args[0]} undone.`);
+    return message.channel.send(`Result for Match ${args[0]} undone.`);
   }
 
   // Else, make sure that the message hasn't been reported already
@@ -271,7 +271,7 @@ async function case_result(message, args, flags, guild, member) {
           user2.queues[0].user_ratings.peak_rating,
           user2.queues[0].user_ratings.rating);
       user2.queues[0].user_ratings.save();
-      message.channel.send(`Result for match ${args[0]} recorded as a draw.`);
+      message.channel.send(`Result for Match ${args[0]} recorded as a draw.`);
       break;
     default:
       if (winner !== user1.lowercase_name &&
@@ -299,7 +299,7 @@ async function case_result(message, args, flags, guild, member) {
           user2.queues[0].user_ratings.rating);
       user2.queues[0].user_ratings.save();
       message.channel.send(
-          `Result for match ${args[0]} recorded as a win for ${args[1]}.`);
+          `Result for Match ${args[0]} recorded as a win for ${args[1]}.`);
   }
 
   update_best_player(match.queue.id, guild);
@@ -353,7 +353,7 @@ async function case_leaderboard(message, args, flags, guild, member) {
   const string_builder = [];
   string_builder.push('```diff');
   string_builder.push('- ' + queue.name);
-  string_builder.push('Rank|Name                    | Elo|Games')
+  string_builder.push('Rank|Name                    |Elo |Games')
   string_builder.push('Diamond '.padEnd(40, '-'));
   while (ui < percentiles.length && percentiles[ui] < .1) {
     string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
@@ -416,10 +416,16 @@ async function case_profile(message, args, flags, guild, member) {
     }]
   });
 
+  // If user has no ratings yet
+  if (ratings_rows.length < 1) {
+    return message.channel.send("This user has not played any games yet.");
+  }
+
   // Build string and print
   const string_builder = [];
   string_builder.push('```');
-  string_builder.push('Queue                   | Elo|Peak|  W|  D|  L|  A');
+  string_builder.push(rating_rows[0].users[0].amq_name);
+  string_builder.push('Queue                   |Elo |Peak|  W|  D|  L|  A');
   for (let i = 0; i < ratings_rows.length; i++) {
     const queue_rating = ratings_rows[i].users[0].user_ratings;
     string_builder.push(ratings_rows[i].name.padEnd(24) + ' ' +
@@ -589,6 +595,12 @@ async function case_queued(message, args, flags, guild, member) {
     }]
   });
 
+  // If user is not waiting in any queues
+  if (lfm_rows.length < 1) {
+    return message.channel.send("You are currently not waiting in any queues.");
+  }
+
+
   // Build list of queued queues
   const string_builder = [];
   string_builder.push('```');
@@ -642,6 +654,11 @@ async function case_pending(message, args, flags, guild, member) {
         model: db.queues,
       }]
     });
+  }
+
+  // If user has no pending matches
+  if (match_rows.length < 1) {
+    return message.channel.send("You currently have no games to play.");
   }
 
   // Build list of pending matches
