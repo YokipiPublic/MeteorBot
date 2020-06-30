@@ -1615,12 +1615,12 @@ async function handle_match_confirmation_reaction(reaction, user) {
   // Take action based on Y/N and delete message and confirmation afterwards
   if (reaction.emoji.name === '✅') {
     confirm_match_result(reaction.message.channel,
-        match_confirmation.match_id, match_confirmation.result);
+        match_confirmation.match.id, match_confirmation.result);
     match_confirmation.destroy();
     reaction.message.delete();
   } else if (reaction.emoji.name === '❌') {
     reaction.message.channel.send(`Result report for Match ` +
-        `${match_confirmation.match_id} cancelled.`);
+        `${match_confirmation.match.id} cancelled.`);
     match_confirmation.destroy();
     reaction.message.delete();
   }
