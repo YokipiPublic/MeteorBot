@@ -265,7 +265,7 @@ async function case_result(message, args, flags, guild, member) {
     return message.channel.send(`Match ${args[0]} deleted.`);
 
   // Mark match as aborted
-  } else if (winner = 'abort') {
+  } else if (winner === 'abort') {
     if (!member.roles.cache.has(config.admin_role))
       return message.channel.send(err.insufficient_privilege);
 
@@ -308,7 +308,7 @@ async function case_result(message, args, flags, guild, member) {
   } else {
     return channel.send('Please enter a valid result.');
   }
-
+  
 }
 
 async function case_leaderboard(message, args, flags, guild, member) {
