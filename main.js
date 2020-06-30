@@ -103,11 +103,22 @@ async function case_changediscord(message, args, flags, guild, member) {
 }
 
 async function case_registerlist(message, args, flags, guild, member) {
+  const user = await db.users.findOne({
+    where: {discord_id: message.author.id}
+  });
+
+  // If message author user not found
+  if (!user) {
+    return message.channel.send('You must register first. ' +
+        'Please reply with `m!register <AMQ Username>` in order to register.');
+  }
+
+  // Send embed to approvals channel
   const embed = new Discord.MessageEmbed()
     .setTitle(args[0])
     .setColor('#2ce660')
     .setURL(args[0])
-    .setDescription(`${message.author.username} (${message.author.id}) ` +
+    .setDescription(`${message.author.username} (${user.amq_name}) ` +
         `is requesting list approval`);
   client.channels.cache.get(config.approvals_channel).send(embed).then((msg) => {
     message.channel.send('List approval requested.');
@@ -118,21 +129,47 @@ async function case_registerlist(message, args, flags, guild, member) {
 }
 
 async function case_rejectlist(message, args, flags, guild, member) {
-  const listuser = client.users.cache.get(args[0]);
-  if (listuser === undefined) message.channel.send("Could not find User with ID given.");
+  const user = await db.users.findOne({
+    where: {lowercase_name: args[0].toLowerCase()}
+  });
+
+  // If user not found via AMQ name
+  if (!user) {
+    return message.channel.send('User with AMQ name given not found.');
+  }
+
+  // Send message to requester
+  const listuser = client.users.cache.get(user.discord_id);
+  if (listuser === undefined) message.channel.send("Could not find user from ID.");
   listuser.send('Your list did not meet the standards of the server ' +
       'and thereby has been rejected.');
   if (args.length === 2) listuser.send(`Included message: ${args[1]}`);
   listuser.send(`Please contact ${client.users.cache.get(config.list_mogul_id)} ` +
       `for further details.`);
+
+  // Send message to moderator
+  message.channel.send('Rejection message sent to user.');
 }
 
 async function case_acceptlist(message, args, flags, guild, member) {
-  const listuser = guild.members.cache.get(args[0]);
-  if (listuser === undefined) message.channel.send("Could not find User with ID given.");
+  const user = await db.users.findOne({
+    where: {lowercase_name: args[0].toLowerCase()}
+  });
+
+  // If user not found via AMQ name
+  if (!user) {
+    return message.channel.send('User with AMQ name given not found.');
+  }
+
+  // Send message to requester
+  const listuser = guild.members.cache.get(user.discord_id);
+  if (listuser === undefined) message.channel.send("Could not find user from ID.");
   listuser.send('Your list has been approved. Congratulations.');
   if (args.length === 2) listuser.send(`Included message: ${args[1]}`);
   listuser.roles.add(config.list_role);
+
+  // Send message to moderator
+  message.channel.send('Acceptance message sent to user.');
 }
 
 async function case_result(message, args, flags, guild, member) {
@@ -152,6 +189,7 @@ async function case_result(message, args, flags, guild, member) {
   if (match === null) return message.channel.send(`Match with ID ${args[0]} not found.`);
 
   // Fetch players
+  // TODO: Wait, there's no way this is necessary
   const user1 = await db.users.findOne({
     where: {id: match.user1.id},
     include: [{
@@ -217,92 +255,56 @@ async function case_result(message, args, flags, guild, member) {
     return message.channel.send('This match has already been reported. ' +
         'If there was a mistake, please notify a moderator ASAP.');
 
-  // Calculate prospective elo changes
-  const gain1 = helper.calculate_elo_gains(
-      user1.queues[0].user_ratings.rating, user2.queues[0].user_ratings.rating,
-      user1.queues[0].user_ratings.wins + user1.queues[0].user_ratings.draws +
-      user1.queues[0].user_ratings.losses < config.placement_games ?
-      config.placement_k : config.stable_k);
-  const gain2 = helper.calculate_elo_gains(
-      user2.queues[0].user_ratings.rating, user1.queues[0].user_ratings.rating,
-      user2.queues[0].user_ratings.wins + user2.queues[0].user_ratings.draws +
-      user2.queues[0].user_ratings.losses < config.placement_games ?
-      config.placement_k : config.stable_k);
+  // Delete row entirely
+  if (winner === 'superabort') {
+    if (!member.roles.cache.has(config.admin_role))
+      return message.channel.send(err.insufficient_privilege);
 
-  switch (winner) {
-    case 'superabort':
-      // Delete row entirely
-      if (!member.roles.cache.has(config.admin_role))
-        return message.channel.send(err.insufficient_privilege);
-      match.destroy();
-      message.channel.send(`Match ${args[0]} deleted.`);
-      break;
-    case 'abort':
-      if (!member.roles.cache.has(config.admin_role))
-        return message.channel.send(err.insufficient_privilege);
-      match.update({
-        timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
-        result: 'ABORT',
-        rating_change1: 0,
-        rating_change2: 0
+    match.destroy();
+    return message.channel.send(`Match ${args[0]} deleted.`);
+
+  // Mark match as aborted
+  } else if (winner = 'abort') {
+    if (!member.roles.cache.has(config.admin_role))
+      return message.channel.send(err.insufficient_privilege);
+
+    match.update({
+      timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
+      result: 'ABORT',
+      rating_change1: 0,
+      rating_change2: 0
+    });
+    user1.queues[0].user_ratings.aborts += 1;
+    user1.queues[0].user_ratings.save();
+    user2.queues[0].user_ratings.aborts += 1;
+    user2.queues[0].user_ratings.save();
+    return message.channel.send(`Match ${args[0]} aborted.`);
+
+  // Post confirmation message for draw or win
+  } else if (winner === 'draw' || winner === 'tie' || winner === 'stalemate' ||
+      winner === user1.lowercase_name || winner === user2.lowercase_name) {
+
+    message.channel.send(`Report result of Match ${args[0]}: ` +
+        `${user1.amq_name} vs. ${user2.amq_name} (${user1.queues[0].name})` +
+        `as ${args[1]}?`
+    ).then((msg) => {
+      // React
+      msg.react('✅');
+      msg.react('❌');
+
+      // Create database entry for confirmation
+      db.match_confirmations.create({
+        author_id: message.author.id,
+        message_id: msg.id,
+        result: args[1]
       });
-      user1.queues[0].user_ratings.aborts += 1;
-      user1.queues[0].user_ratings.save();
-      user2.queues[0].user_ratings.aborts += 1;
-      user2.queues[0].user_ratings.save();
-      message.channel.send(`Match ${args[0]} aborted.`);
-      break;
-    case 'draw': case 'tie': case 'stalemate':
-      match.update({
-        timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
-        result: 'DRAW',
-        rating_change1: gain1[1],
-        rating_change2: gain2[1]
-      });
-      user1.queues[0].user_ratings.rating += gain1[1];
-      user1.queues[0].user_ratings.draws += 1;
-      user1.queues[0].user_ratings.peak_rating = Math.max(
-          user1.queues[0].user_ratings.peak_rating,
-          user1.queues[0].user_ratings.rating);
-      user1.queues[0].user_ratings.save();
-      user2.queues[0].user_ratings.rating += gain2[1];
-      user2.queues[0].user_ratings.draws += 1;
-      user2.queues[0].user_ratings.peak_rating = Math.max(
-          user2.queues[0].user_ratings.peak_rating,
-          user2.queues[0].user_ratings.rating);
-      user2.queues[0].user_ratings.save();
-      message.channel.send(`Result for Match ${args[0]} recorded as a draw.`);
-      break;
-    default:
-      if (winner !== user1.lowercase_name &&
-          winner !== user2.lowercase_name)
-        return message.channel.send('Please enter a valid result.');
-      const win1 = winner === user1.lowercase_name;
-      match.update({
-        timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
-        result: winner,
-        rating_change1: gain1[win1 ? 0 : 2],
-        rating_change2: gain2[win1 ? 2 : 0]
-      });
-      user1.queues[0].user_ratings.rating += gain1[win1 ? 0 : 2];
-      user1.queues[0].user_ratings.wins += win1 ? 1 : 0;
-      user1.queues[0].user_ratings.losses += win1 ? 0 : 1;
-      user1.queues[0].user_ratings.peak_rating = Math.max(
-          user1.queues[0].user_ratings.peak_rating,
-          user1.queues[0].user_ratings.rating);
-      user1.queues[0].user_ratings.save();
-      user2.queues[0].user_ratings.rating += gain2[win1 ? 2 : 0];
-      user2.queues[0].user_ratings.wins += win1 ? 0 : 1;
-      user2.queues[0].user_ratings.losses += win1 ? 1 : 0;
-      user2.queues[0].user_ratings.peak_rating = Math.max(
-          user2.queues[0].user_ratings.peak_rating,
-          user2.queues[0].user_ratings.rating);
-      user2.queues[0].user_ratings.save();
-      message.channel.send(
-          `Result for Match ${args[0]} recorded as a win for ${args[1]}.`);
+    });
+
+  // Not a valid entry
+  } else {
+    return channel.send('Please enter a valid result.');
   }
 
-  update_best_player(match.queue.id, guild);
 }
 
 async function case_leaderboard(message, args, flags, guild, member) {
@@ -351,7 +353,6 @@ async function case_leaderboard(message, args, flags, guild, member) {
   // Build string and print
   let ui = 0;
   const string_builder = [];
-  string_builder.push('```diff');
   string_builder.push('- ' + queue.name);
   string_builder.push('Rank|Name                    |Elo |Games')
   string_builder.push('Diamond '.padEnd(40, '-'));
@@ -389,8 +390,13 @@ async function case_leaderboard(message, args, flags, guild, member) {
         playcounts[ui].toString().padStart(5));
     ui++;
   }
-  string_builder.push('```');
-  message.channel.send(string_builder.join('\n'));
+  while (string_builder.length > 0) {
+    const string_builder_segment = [];
+    string_builder_segment.push('```diff');
+    string_builder_segment.concat(string_builder.splice(0, 40));
+    string_builder_segment.push('```');
+    message.channel.send(string_builder.join('\n'));
+  }
 }
 
 async function case_profile(message, args, flags, guild, member) {
@@ -600,7 +606,6 @@ async function case_queued(message, args, flags, guild, member) {
     return message.channel.send("You are currently not waiting in any queues.");
   }
 
-
   // Build list of queued queues
   const string_builder = [];
   string_builder.push('```');
@@ -665,9 +670,15 @@ async function case_pending(message, args, flags, guild, member) {
   const string_builder = [];
   string_builder.push('```');
   for (let i = 0; i < match_rows.length; i++) {
-    string_builder.push(`ID# ${match_rows[i].id.toString().padStart(5)} - ` +
-      `${match_rows[i].queue.name.padEnd(24)}: ` + 
-      `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`);
+    const match_string = `ID# ${match_rows[i].id.toString().padStart(5)} - ` +
+        `${match_rows[i].queue.name.padEnd(24)}: ` + 
+        `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`;
+    if (flags.includes('deadlines')) {
+      const deadline_date = new Date(match_rows[i].created_at);
+      deadline_date.setDate(deadline_date.getDate() + 7);
+      match_string.concat(` ${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
+    }
+    string_builder.push();
   }
   string_builder.push('```');
   message.channel.send('This user has the following matches to play:');
@@ -750,7 +761,7 @@ async function case_setupqueue(message, args, flags, guild, member) {
             realtime_reward_role: args[i+2],
             custom_reward_role: args[i+3],
             required_role: required_role
-          })
+          });
         // If found, update it
         } else {
           queue.update({
@@ -759,7 +770,7 @@ async function case_setupqueue(message, args, flags, guild, member) {
             realtime_reward_role: args[i+2],
             custom_reward_role: args[i+3],
             required_role: required_role
-          })
+          });
         }
         react_message.react(args[i+1]);
       }
@@ -808,7 +819,11 @@ async function case_setmatchmakingrequirements(message, args, flags, guild, memb
 
 async function case_rawsqlite(message, args, flags, guild, member) {
   db.sequelize.query(args[0]).spread((results, metadata) => {
-    message.channel.send('```' + JSON.stringify(results, null, 2) + '```');
+    const results = JSON.stringify(results, null, 2);
+    if (results.length > 1950) {
+      message.channel.send('Character limit exceeded.');
+    }
+    message.channel.send('```' + results + '```');
   });
 }
 
@@ -824,6 +839,104 @@ async function case_clearlocks(message, args, flags, guild, member) {
 
 async function case_help(message, args, flags, guild, member) {
   message.channel.send('Please check the pinned message under #bot_commands.');
+}
+
+async function confirm_match_result(channel, match_id, result) {
+  // Fetch relevant match
+  const match = await db.matches.findOne({
+    where: {id: match_id},
+    include: [{
+      model: db.users,
+      as: 'user1',
+    }, {
+      model: db.users,
+      as: 'user2'
+    }, {
+      model: db.queues
+    }]
+  });
+  if (match === null) {
+    console.log('ERROR: Match not found after confirmation step');
+    return channel.send(`Match with ID ${match_id} not found.`);
+  }
+
+  // Fetch players
+  // TODO: Wait, there's no way this is necessary
+  const user1 = await db.users.findOne({
+    where: {id: match.user1.id},
+    include: [{
+      model: db.queues,
+      where: {name: match.queue.name},
+    }]
+  });
+  const user2 = await db.users.findOne({
+    where: {id: match.user2.id},
+    include: [{
+      model: db.queues,
+      where: {name: match.queue.name},
+    }]
+  });
+
+  // Calculate prospective elo changes
+  const gain1 = helper.calculate_elo_gains(
+      user1.queues[0].user_ratings.rating, user2.queues[0].user_ratings.rating,
+      user1.queues[0].user_ratings.wins + user1.queues[0].user_ratings.draws +
+      user1.queues[0].user_ratings.losses < config.placement_games ?
+      config.placement_k : config.stable_k);
+  const gain2 = helper.calculate_elo_gains(
+      user2.queues[0].user_ratings.rating, user1.queues[0].user_ratings.rating,
+      user2.queues[0].user_ratings.wins + user2.queues[0].user_ratings.draws +
+      user2.queues[0].user_ratings.losses < config.placement_games ?
+      config.placement_k : config.stable_k);
+
+  const winner = result.toLowerCase();
+  switch (winner) {
+    case 'draw': case 'tie': case 'stalemate':
+      match.update({
+        timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
+        result: 'DRAW',
+        rating_change1: gain1[1],
+        rating_change2: gain2[1]
+      });
+      user1.queues[0].user_ratings.rating += gain1[1];
+      user1.queues[0].user_ratings.draws += 1;
+      user1.queues[0].user_ratings.peak_rating = Math.max(
+          user1.queues[0].user_ratings.peak_rating,
+          user1.queues[0].user_ratings.rating);
+      user1.queues[0].user_ratings.save();
+      user2.queues[0].user_ratings.rating += gain2[1];
+      user2.queues[0].user_ratings.draws += 1;
+      user2.queues[0].user_ratings.peak_rating = Math.max(
+          user2.queues[0].user_ratings.peak_rating,
+          user2.queues[0].user_ratings.rating);
+      user2.queues[0].user_ratings.save();
+      channel.send(`Result for Match ${match_id} recorded as a draw.`);
+      break;
+    default:
+      const win1 = winner === user1.lowercase_name;
+      match.update({
+        timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
+        result: winner,
+        rating_change1: gain1[win1 ? 0 : 2],
+        rating_change2: gain2[win1 ? 2 : 0]
+      });
+      user1.queues[0].user_ratings.rating += gain1[win1 ? 0 : 2];
+      user1.queues[0].user_ratings.wins += win1 ? 1 : 0;
+      user1.queues[0].user_ratings.losses += win1 ? 0 : 1;
+      user1.queues[0].user_ratings.peak_rating = Math.max(
+          user1.queues[0].user_ratings.peak_rating,
+          user1.queues[0].user_ratings.rating);
+      user1.queues[0].user_ratings.save();
+      user2.queues[0].user_ratings.rating += gain2[win1 ? 2 : 0];
+      user2.queues[0].user_ratings.wins += win1 ? 0 : 1;
+      user2.queues[0].user_ratings.losses += win1 ? 1 : 0;
+      user2.queues[0].user_ratings.peak_rating = Math.max(
+          user2.queues[0].user_ratings.peak_rating,
+          user2.queues[0].user_ratings.rating);
+      user2.queues[0].user_ratings.save();
+      channel.send(`Result for Match ${match_id} recorded as a win for ${result}.`);
+
+  update_best_player(match.queue.id, guild);
 }
 
 // Function for determining top of ladder
@@ -985,7 +1098,7 @@ client.on('message', async (message) => {
       break;
 
     // Used to accept list pending approval
-    case 'acceptlist':
+    case 'acceptlist': case 'approvelist':
       if (message.guild === undefined)
         return message.channel.send(err.dm_disallowed);
       if (!member.roles.cache.has(config.admin_role))
@@ -997,7 +1110,7 @@ client.on('message', async (message) => {
       break;
 
     // Used to report results of a match
-    case 'result':
+    case 'result': case 'r':
       if (message.guild === undefined)
         return message.channel.send(err.dm_disallowed);
       if (args.length !== 2)
@@ -1007,7 +1120,7 @@ client.on('message', async (message) => {
       break;
 
     // Displays leaderboard for specified queue
-    case 'leaderboard':
+    case 'leaderboard': case 'leaderboards': case 'lb':
       if (args.length !== 1)
         return message.channel.send(err.number_of_arguments);
 
@@ -1030,7 +1143,7 @@ client.on('message', async (message) => {
       break;
 
     // Allows users to check their pending queues
-    case 'queued':
+    case 'queued': case 'queues': case 'queue':
       if (args.length !== 0)
         return message.channel.send(err.number_of_arguments);
 
@@ -1317,17 +1430,17 @@ const matchmake = async function(queue_name) {
       for (let j = 0; j < lfm_num; j++) {
         if (i === j) continue;
         let weight = 0;
-        for (let k = 0; k < pending_matches.length; k++) {
+        for (let k = 0; k < pending_matches[i].length; k++) {
           weight *= config.max_matches;
-          if (pending_matches[k].user1_id === lfm_rows[j].user.id ||
-              pending_matches[k].user2_id === lfm_rows[j].user.id) weight += 1;
+          if (pending_matches[i][k].user1_id === lfm_rows[j].user.id ||
+              pending_matches[i][k].user2_id === lfm_rows[j].user.id) weight += 1;
           weight *= config.max_matches;
         }
-        for (let k = 0; k < 5-pending_matches.length; k++) {
+        for (let k = 0; k < 5-pending_matches[i].length; k++) {
           weight *= config.max_matches;
-          if (k < recent_matches.length &&
-              (recent_matches[k].user1_id === lfm_rows[j].user.id ||
-              recent_matches[k].user2_id === lfm_rows[j].user.id)) weight += 1;
+          if (k < recent_matches[i].length &&
+              (recent_matches[i][k].user1_id === lfm_rows[j].user.id ||
+              recent_matches[i][k].user2_id === lfm_rows[j].user.id)) weight += 1;
           weight *= config.max_matches;
         }
         const elodiff = Math.abs(percentiles[i] - percentiles[j]);
@@ -1352,20 +1465,9 @@ const matchmake = async function(queue_name) {
   }
 };
 
-// Handle reactions
-client.on('messageReactionAdd', async (reaction, user) => {
-  if (user.bot) return;
-
-  // Check if reaction is partial, if so, fetch it
-  if (reaction.partial) {
-    try {
-      await reaction.fetch();
-    } catch (error) {
-      console.log('Error fetching message: ', error);
-      return;
-    }
-  }
-
+// Possible reaction cases
+// Reaction to join a queue
+async function handle_queue_reaction(reaction, user) {
   // Get appropriate queue
   const queue = await db.queues.findOne({
     where: {
@@ -1467,10 +1569,56 @@ client.on('messageReactionAdd', async (reaction, user) => {
   console.log(`${user.username} ${lfm_row === null ? 'queued to' : 'unqueued from'} `+
       `"${queue.name}"`);
   user.send(`You have been ${lfm_row === null ? 'queued to' : 'unqueued from'} ` +
-      `"${queue.name}"`)
-    .catch((e) => {
-      console.log('Failed to send direct message.');
-    });
+      `"${queue.name}"`
+  ).catch((e) => {
+    console.log('Failed to send direct message.');
+  });
+}
+
+// Reaction to confirm a match result
+async function handle_match_confirmation_reaction(reaction, user) {
+  // Get appropriate queue
+  const match_confirmation = await db.match_confirmations.findOne({
+    where: {
+      author_id: user.id,
+      message_id: reaction.message.id
+    },
+    include: [{
+      model: db.matches,
+      attributes: ['id']
+    }]
+  });
+  if (match_confirmation === null) return;
+  console.log('Match confirmation reaction detected');
+
+  // Take action based on Y/N and delete message and confirmation afterwards
+  if (reaction.emoji.name === '✅') {
+    confirm_match_result(reaction.message.channel,
+        match_confirmation.match.id, match_confirmation.result);
+    match_confirmation.destroy();
+    reaction.message.delete();
+  } else if (reaction.emoji.name === '❌') {
+    match_confirmation.destroy();
+    reaction.message.delete();
+  }
+}
+
+// Handle reactions
+client.on('messageReactionAdd', async (reaction, user) => {
+  if (user.bot) return;
+
+  // Check if reaction is partial, if so, fetch it
+  if (reaction.partial) {
+    try {
+      await reaction.fetch();
+    } catch (error) {
+      console.log('Error fetching message: ', error);
+      return;
+    }
+  }
+
+  handle_queue_reaction(reaction, user);
+  handle_match_confirmation_reaction(reaction, user);
 });
 
 client.login(token);

@@ -91,6 +91,20 @@ db.matches = sequelize.define('matches', {
   underscored: true,
 });
 
+db.match_confirmations = sequelize.define('match_confirmations', {
+  author_id: {
+    type: Sequelize.STRING,
+  },
+  message_id: {
+    type: Sequelize.STRING,
+  },
+  result: {
+    type: Sequelize.STRING,
+  },
+}, {
+  underscored: true,
+});
+
 db.user_ratings = sequelize.define('user_ratings', {
   rating: {
     type: Sequelize.INTEGER,
@@ -125,6 +139,7 @@ db.lfm_users.belongsTo(db.queues);
 db.matches.belongsTo(db.users, {as: 'user1'});
 db.matches.belongsTo(db.users, {as: 'user2'});
 db.matches.belongsTo(db.queues);
+db.match_confirmations.belongsTo(db.matches);
 db.users.belongsToMany(db.queues, {through: db.user_ratings});
 db.queues.belongsToMany(db.users, {through: db.user_ratings});
 
