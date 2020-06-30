@@ -682,10 +682,11 @@ async function case_pending(message, args, flags, guild, member) {
         `${match_rows[i].queue.name.padEnd(24)}: ` + 
         `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`;
     if (flags.includes('deadlines')) {
-      const deadline_date = new Date(match_rows[i].created_at);
+      match_string = match_string.padEnd(100);
+      const deadline_date = new Date(match_rows[i].created_at.toString());
       deadline_date.setDate(deadline_date.getDate() + 7);
-      match_string = 
-          match_string.concat(` ${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
+      match_string = match_string.concat(
+          ` ${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
     }
     string_builder.push(match_string);
   }
@@ -1073,6 +1074,8 @@ client.on('message', async (message) => {
     args[i] = args[i][1] === undefined ? args[i][2] : args[i][1];
     if (args[i].startsWith('--')) {
       flags[flags_count++] = args.splice(i--, 1)[0].slice(2);
+    } else if (args[i].startsWith('—')) {
+      flags[flags_count++] = args.splice(i--, 1)[0].slice(1);
     }
   }
   const cmd = args.shift().toLowerCase();
