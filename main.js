@@ -247,7 +247,7 @@ async function case_result(message, args, flags, guild, member) {
     match.update({
       result: 'PENDING'
     });
-    update_best_player(match.queue.id, guild);
+    update_best_player(match.queue.id);
     return message.channel.send(`Result for Match ${args[0]} undone.`);
   }
 
@@ -400,7 +400,7 @@ async function case_leaderboard(message, args, flags, guild, member) {
     string_builder_segment.push('```diff');
     string_builder_segment.concat(string_builder.splice(0, 40));
     string_builder_segment.push('```');
-    message.channel.send(string_builder.join('\n'));
+    message.channel.send(string_builder_segment.join('\n'));
   }
 }
 
@@ -435,7 +435,7 @@ async function case_profile(message, args, flags, guild, member) {
   // Build string and print
   const string_builder = [];
   string_builder.push('```');
-  string_builder.push(rating_rows[0].users[0].amq_name);
+  string_builder.push(ratings_rows[0].users[0].amq_name);
   string_builder.push('Queue                   |Elo |Peak|  W|  D|  L|  A');
   for (let i = 0; i < ratings_rows.length; i++) {
     const queue_rating = ratings_rows[i].users[0].user_ratings;
@@ -683,7 +683,7 @@ async function case_pending(message, args, flags, guild, member) {
       deadline_date.setDate(deadline_date.getDate() + 7);
       match_string.concat(` ${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
     }
-    string_builder.push();
+    string_builder.push(match_string);
   }
   string_builder.push('```');
   message.channel.send('This user has the following matches to play:');
@@ -957,12 +957,14 @@ async function confirm_match_result(channel, match_id, result) {
     channel.send('Unexpected match result provided.');
   }
 
-  update_best_player(match.queue.id, guild);
+  update_best_player(match.queue.id);
 }
 
 // Function for determining top of ladder
-async function update_best_player(queue_id, guild) {
+async function update_best_player(queue_id) {
   // Fetch top player of respective queue, tiebroken by games played
+  const guild = client.guilds.cache.get(config.guild_id);
+
   // TODO: Figure out how to order by sum of multiple columns in through table
   const top_player_rows = await db.users.findAll({
     include: [{
