@@ -289,8 +289,8 @@ async function case_result(message, args, flags, guild, member) {
       winner === user1.lowercase_name || winner === user2.lowercase_name) {
 
     message.channel.send(`Report result of Match ${args[0]}: ` +
-        `${user1.amq_name} vs. ${user2.amq_name} (${user1.queues[0].name})` +
-        `as ${args[1]}?`
+        `${user1.amq_name} vs. ${user2.amq_name} (${user1.queues[0].name}) ` +
+        `as \`${args[1]}\`?`
     ).then((msg) => {
       // React
       msg.react('✅');
@@ -308,7 +308,6 @@ async function case_result(message, args, flags, guild, member) {
   } else {
     return channel.send('Please enter a valid result.');
   }
-  
 }
 
 async function case_leaderboard(message, args, flags, guild, member) {
@@ -863,6 +862,11 @@ async function confirm_match_result(channel, match_id, result) {
     console.log('ERROR: Match not found after confirmation step');
     return channel.send(`Match with ID ${match_id} not found.`);
   }
+
+  // Make sure match still hasn't been reported
+  if (match.result !== 'PENDING')
+    return message.channel.send('This match has already been reported. ' +
+        'If there was a mistake, please notify a moderator ASAP.');
 
   // Fetch players
   // TODO: Wait, there's no way this is necessary
@@ -1609,7 +1613,7 @@ async function handle_match_confirmation_reaction(reaction, user) {
   // Take action based on Y/N and delete message and confirmation afterwards
   if (reaction.emoji.name === '✅') {
     confirm_match_result(reaction.message.channel,
-        match_confirmation.match.id, match_confirmation.result);
+        match_confirmation.match_id, match_confirmation.result);
     match_confirmation.destroy();
     reaction.message.delete();
   } else if (reaction.emoji.name === '❌') {
