@@ -279,7 +279,10 @@ async function case_result(message, args, flags, guild, member) {
     user1.queues[0].user_ratings.save();
     user2.queues[0].user_ratings.aborts += 1;
     user2.queues[0].user_ratings.save();
-    return message.channel.send(`Match ${args[0]} aborted.`);
+    return message.channel.send(
+      `${client.users.cache.get(user1.discord_id)} ` +
+      `${client.users.cache.get(user2.discord_id)} ` +
+      `Match ${args[0]} aborted.`);
 
   // Post confirmation message for draw or win
   } else if (winner === 'draw' || winner === 'tie' || winner === 'stalemate' ||
@@ -891,51 +894,62 @@ async function confirm_match_result(channel, match_id, result) {
       config.placement_k : config.stable_k);
 
   const winner = result.toLowerCase();
-  switch (winner) {
-    case 'draw': case 'tie': case 'stalemate':
-      match.update({
-        timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
-        result: 'DRAW',
-        rating_change1: gain1[1],
-        rating_change2: gain2[1]
-      });
-      user1.queues[0].user_ratings.rating += gain1[1];
-      user1.queues[0].user_ratings.draws += 1;
-      user1.queues[0].user_ratings.peak_rating = Math.max(
-          user1.queues[0].user_ratings.peak_rating,
-          user1.queues[0].user_ratings.rating);
-      user1.queues[0].user_ratings.save();
-      user2.queues[0].user_ratings.rating += gain2[1];
-      user2.queues[0].user_ratings.draws += 1;
-      user2.queues[0].user_ratings.peak_rating = Math.max(
-          user2.queues[0].user_ratings.peak_rating,
-          user2.queues[0].user_ratings.rating);
-      user2.queues[0].user_ratings.save();
-      channel.send(`Result for Match ${match_id} recorded as a draw.`);
-      break;
-    default:
-      const win1 = winner === user1.lowercase_name;
-      match.update({
-        timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
-        result: winner,
-        rating_change1: gain1[win1 ? 0 : 2],
-        rating_change2: gain2[win1 ? 2 : 0]
-      });
-      user1.queues[0].user_ratings.rating += gain1[win1 ? 0 : 2];
-      user1.queues[0].user_ratings.wins += win1 ? 1 : 0;
-      user1.queues[0].user_ratings.losses += win1 ? 0 : 1;
-      user1.queues[0].user_ratings.peak_rating = Math.max(
-          user1.queues[0].user_ratings.peak_rating,
-          user1.queues[0].user_ratings.rating);
-      user1.queues[0].user_ratings.save();
-      user2.queues[0].user_ratings.rating += gain2[win1 ? 2 : 0];
-      user2.queues[0].user_ratings.wins += win1 ? 0 : 1;
-      user2.queues[0].user_ratings.losses += win1 ? 1 : 0;
-      user2.queues[0].user_ratings.peak_rating = Math.max(
-          user2.queues[0].user_ratings.peak_rating,
-          user2.queues[0].user_ratings.rating);
-      user2.queues[0].user_ratings.save();
-      channel.send(`Result for Match ${match_id} recorded as a win for ${result}.`);
+  // If result is a name
+  if (winner === user1.lowercase_name || winner === user2.lowercase_name) {
+    const win1 = winner === user1.lowercase_name;
+    match.update({
+      timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
+      result: winner,
+      rating_change1: gain1[win1 ? 0 : 2],
+      rating_change2: gain2[win1 ? 2 : 0]
+    });
+    user1.queues[0].user_ratings.rating += gain1[win1 ? 0 : 2];
+    user1.queues[0].user_ratings.wins += win1 ? 1 : 0;
+    user1.queues[0].user_ratings.losses += win1 ? 0 : 1;
+    user1.queues[0].user_ratings.peak_rating = Math.max(
+        user1.queues[0].user_ratings.peak_rating,
+        user1.queues[0].user_ratings.rating);
+    user1.queues[0].user_ratings.save();
+    user2.queues[0].user_ratings.rating += gain2[win1 ? 2 : 0];
+    user2.queues[0].user_ratings.wins += win1 ? 0 : 1;
+    user2.queues[0].user_ratings.losses += win1 ? 1 : 0;
+    user2.queues[0].user_ratings.peak_rating = Math.max(
+        user2.queues[0].user_ratings.peak_rating,
+        user2.queues[0].user_ratings.rating);
+    user2.queues[0].user_ratings.save();
+    channel.send(
+      `${client.users.cache.get(user1.discord_id)} ` +
+      `${client.users.cache.get(user2.discord_id)} ` +
+      `Result for Match ${match_id} recorded as a win for ${result}.`);
+  // If result is a draw
+  } else if (winner === 'draw' || winner === 'tie' || winner === 'stalemate') {
+    match.update({
+      timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
+      result: 'DRAW',
+      rating_change1: gain1[1],
+      rating_change2: gain2[1]
+    });
+    user1.queues[0].user_ratings.rating += gain1[1];
+    user1.queues[0].user_ratings.draws += 1;
+    user1.queues[0].user_ratings.peak_rating = Math.max(
+        user1.queues[0].user_ratings.peak_rating,
+        user1.queues[0].user_ratings.rating);
+    user1.queues[0].user_ratings.save();
+    user2.queues[0].user_ratings.rating += gain2[1];
+    user2.queues[0].user_ratings.draws += 1;
+    user2.queues[0].user_ratings.peak_rating = Math.max(
+        user2.queues[0].user_ratings.peak_rating,
+        user2.queues[0].user_ratings.rating);
+    user2.queues[0].user_ratings.save();
+    channel.send(
+      `${client.users.cache.get(user1.discord_id)} ` +
+      `${client.users.cache.get(user2.discord_id)} ` +
+      `Result for Match ${match_id} recorded as a draw.`);
+  // Otherwise, there's a problem
+  } else {
+    console.log('ERROR: Match result unexpected after confirmation step')
+    channel.send('Unexpected match result provided.');
+  }
 
   update_best_player(match.queue.id, guild);
 }
