@@ -1604,7 +1604,7 @@ async function handle_queue_reaction(reaction, user) {
   console.log(`${user.username} ${lfm_row === null ? 'queued to' : 'unqueued from'} `+
       `"${queue.name}"`);
   user.send(`You have been ${lfm_row === null ? 'queued to' : 'unqueued from'} ` +
-      `"${queue.name}"`
+      `"${queue.name}".`
   ).catch((e) => {
     console.log('Failed to send direct message.');
   });
