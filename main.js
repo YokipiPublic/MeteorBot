@@ -683,7 +683,7 @@ async function case_pending(message, args, flags, guild, member) {
         `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`;
     if (flags.includes('deadlines')) {
       match_string = match_string.padEnd(100);
-      const deadline_date = new Date(match_rows[i].created_at.toString());
+      const deadline_date = new Date(match_rows[i].timestamp);
       deadline_date.setDate(deadline_date.getDate() + 7);
       match_string = match_string.concat(
           ` ${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
@@ -1292,6 +1292,7 @@ client.on('message', async (message) => {
 const make_match = async function(user1, elo1, user2, elo2) {
   db.matches.create({
     result: 'PENDING',
+    timestamp: db.sequelize.literal('CURRENT_TIMESTAMP')
   }).then((match) => {
     match.setUser1(user1.user);
     match.setUser2(user2.user);
