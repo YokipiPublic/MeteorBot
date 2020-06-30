@@ -301,6 +301,8 @@ async function case_result(message, args, flags, guild, member) {
         author_id: message.author.id,
         message_id: msg.id,
         result: args[1]
+      }).then((confirmation) => {
+        confirmation.setMatch(match);
       });
     });
 
@@ -1617,6 +1619,8 @@ async function handle_match_confirmation_reaction(reaction, user) {
     match_confirmation.destroy();
     reaction.message.delete();
   } else if (reaction.emoji.name === '❌') {
+    reaction.message.channel.send(`Result report for Match ` +
+        `${match_confirmation.match_id} cancelled.`);
     match_confirmation.destroy();
     reaction.message.delete();
   }
