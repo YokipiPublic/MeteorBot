@@ -689,7 +689,7 @@ async function case_pending(message, args, flags, guild, member) {
         const deadline_date = new Date(match_rows[i].timestamp);
         deadline_date.setDate(deadline_date.getDate() + 7);
         match_string = match_string.concat(
-            ` ${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
+            `${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
       }
     }
     string_builder.push(match_string);
