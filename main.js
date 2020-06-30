@@ -435,10 +435,10 @@ async function case_profile(message, args, flags, guild, member) {
   const string_builder = [];
   string_builder.push('```');
   string_builder.push(ratings_rows[0].users[0].amq_name);
-  string_builder.push('Queue                   |Elo |Peak|  W|  D|  L|  A');
+  string_builder.push('Queue           |Elo |Peak|  W|  D|  L|  A');
   for (let i = 0; i < ratings_rows.length; i++) {
     const queue_rating = ratings_rows[i].users[0].user_ratings;
-    string_builder.push(ratings_rows[i].name.padEnd(24) + ' ' +
+    string_builder.push(ratings_rows[i].name.padEnd(16) + ' ' +
           queue_rating.rating.toString().padStart(4) + ' ' +
           queue_rating.peak_rating.toString().padStart(4) + ' ' +
           queue_rating.wins.toString().padStart(3) + ' ' +
@@ -580,11 +580,11 @@ async function case_headtohead(message, args, flags, guild, member) {
   const string_builder = [];
   string_builder.push('```');
   string_builder.push(`${args[0]}'s record against ${args[1]}`);
-  string_builder.push('Queue                   |  W|  D|  L|  A');
+  string_builder.push('Queue           |  W|  D|  L|  A');
   for (let i = 0; i < queue_data.length; i++) {
     if (queue_data[i].wins + queue_data[i].draws +
         queue_data[i].losses + queue_data[i].aborts < 1) continue;
-    string_builder.push(queue_data[i].name.padEnd(24) + ' ' +
+    string_builder.push(queue_data[i].name.padEnd(16) + ' ' +
           queue_data[i].wins.toString().padStart(3) + ' ' +
           queue_data[i].draws.toString().padStart(3) + ' ' +
           queue_data[i].losses.toString().padStart(3) + ' ' +
@@ -679,14 +679,18 @@ async function case_pending(message, args, flags, guild, member) {
   string_builder.push('```');
   for (let i = 0; i < match_rows.length; i++) {
     let match_string = `ID# ${match_rows[i].id.toString().padStart(5)} - ` +
-        `${match_rows[i].queue.name.padEnd(24)}: ` + 
+        `${match_rows[i].queue.name.padEnd(16)}: ` + 
         `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`;
     if (flags.includes('deadlines')) {
-      match_string = match_string.padEnd(100);
-      const deadline_date = new Date(match_rows[i].timestamp);
-      deadline_date.setDate(deadline_date.getDate() + 7);
-      match_string = match_string.concat(
-          ` ${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
+      match_string = match_string.padEnd(75);
+      if (!match_rows[i].timestamp) {
+        match_string = match_string.concat('No Deadline Set');
+      } else {
+        const deadline_date = new Date(match_rows[i].timestamp);
+        deadline_date.setDate(deadline_date.getDate() + 7);
+        match_string = match_string.concat(
+            ` ${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
+      }
     }
     string_builder.push(match_string);
   }
@@ -1181,7 +1185,7 @@ client.on('message', async (message) => {
       break;
 
     // Allows users to check their (and others') pending matches
-    case 'pending': case 'pend': case 'p':
+    case 'pending': case 'pendings': case 'pend': case 'p':
       if (args.length > 1)
         return message.channel.send(err.number_of_arguments);
 
@@ -1301,7 +1305,7 @@ const make_match = async function(user1, elo1, user2, elo2) {
     // Notify matchmade players
     client.channels.cache.get(config.match_channel).send(
         `Match ID# \`${match.id.toString().padStart(5)}\` - ` +
-        `Queue \`${user1.queue.name.padEnd(24)}\`:` +
+        `Queue \`${user1.queue.name.padEnd(16)}\`:` +
         `${client.users.cache.get(user1.user.discord_id)} ` +
         `${user1.user.amq_name} (${helper.what_elo(elo1)}) vs. ` +
         `${client.users.cache.get(user2.user.discord_id)} ` +
