@@ -40,8 +40,9 @@ async function case_register(message, args, flags, guild, member) {
       member.roles.add(config.tourny_role);
       console.log(`${args[0]} registered`);
       message.reply(`${args[0]} successfully registered. ` +
-          'Please use `m!registerlist <List URL>` to have your list verified ' +
-          'if you would like to participate in list formats. This can be done via DM.');
+          'Please use `m!list <List URL>` to have your list verified ' +
+          'if you would like to participate in list formats. ' +
+          'This can be sent to the bot via DM.');
     }).catch((e) => {
       if (e.name === 'SequelizeUniqueConstraintError') {
         if(e.fields.includes('amq_name')) {
@@ -819,11 +820,11 @@ async function case_setmatchmakingrequirements(message, args, flags, guild, memb
 
 async function case_rawsqlite(message, args, flags, guild, member) {
   db.sequelize.query(args[0]).spread((results, metadata) => {
-    const results = JSON.stringify(results, null, 2);
-    if (results.length > 1950) {
+    const results_string = JSON.stringify(results, null, 2);
+    if (results_string.length > 1950) {
       message.channel.send('Character limit exceeded.');
     }
-    message.channel.send('```' + results + '```');
+    message.channel.send('```' + results_string + '```');
   });
 }
 
@@ -1078,7 +1079,7 @@ client.on('message', async (message) => {
       break;
 
     // Used to request list approval
-    case 'registerlist':
+    case 'registerlist': case 'list':
       if (args.length !== 1)
         return message.channel.send(err.number_of_arguments);
 
@@ -1128,7 +1129,7 @@ client.on('message', async (message) => {
       break;
 
     // Displays profile for specified user
-    case 'profile':
+    case 'profile': case 'prof':
       if (args.length > 1)
         return message.channel.send(err.number_of_arguments);
 
@@ -1143,7 +1144,7 @@ client.on('message', async (message) => {
       break;
 
     // Allows users to check their pending queues
-    case 'queued': case 'queues': case 'queue':
+    case 'queued': case 'queues': case 'queue': case 'q':
       if (args.length !== 0)
         return message.channel.send(err.number_of_arguments);
 
@@ -1151,7 +1152,7 @@ client.on('message', async (message) => {
       break;
 
     // Allows users to check their (and others') pending matches
-    case 'pending':
+    case 'pending': case 'pend': case 'p':
       if (args.length > 1)
         return message.channel.send(err.number_of_arguments);
 
@@ -1159,7 +1160,7 @@ client.on('message', async (message) => {
       break;
 
     // Sets name for personal role
-    case 'title':
+    case 'title': case 't':
       if (args.length !== 1)
         return message.channel.send(err.number_of_arguments);
 
@@ -1215,7 +1216,7 @@ client.on('message', async (message) => {
       break;
 
     // Run raw SQLite query
-    case 'rawsqlite':
+    case 'rawsqlite': case 'raw':
       if (message.guild === undefined)
         return message.channel.send(err.dm_disallowed);
       if (!member.roles.cache.has(config.admin_role))
@@ -1519,8 +1520,8 @@ async function handle_queue_reaction(reaction, user) {
       }
     }]
   });
-  if (match_count >= 3)
-    return user.send('You already have 3 matches to play in this queue.')
+  if (match_count >= 5)
+    return user.send('You already have 5 matches to play in this queue.')
         .catch((e) => {
           console.log('Failed to send direct message.');
         });
