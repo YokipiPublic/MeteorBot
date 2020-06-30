@@ -396,9 +396,8 @@ async function case_leaderboard(message, args, flags, guild, member) {
     ui++;
   }
   while (string_builder.length > 0) {
-    const string_builder_segment = [];
-    string_builder_segment.push('```diff');
-    string_builder_segment.concat(string_builder.splice(0, 40));
+    const string_builder_segment = string_builder.splice(0, 40);
+    string_builder_segment.unshift('```diff');
     string_builder_segment.push('```');
     message.channel.send(string_builder_segment.join('\n'));
   }
@@ -645,6 +644,11 @@ async function case_pending(message, args, flags, guild, member) {
         model: db.queues,
       }]
     });
+    // If user has no pending matches
+    if (match_rows.length < 1) {
+      return message.channel.send('You currently have no games to play.');
+    }
+
   } else {
     match_rows = await db.matches.findAll({
       where: {
@@ -664,24 +668,24 @@ async function case_pending(message, args, flags, guild, member) {
         model: db.queues,
       }]
     });
-  }
-
-  // If user has no pending matches
-  if (match_rows.length < 1) {
-    return message.channel.send("You currently have no games to play.");
+    // If user has no pending matches
+    if (match_rows.length < 1) {
+      return message.channel.send('This user currently has no games to play.');
+    }
   }
 
   // Build list of pending matches
   const string_builder = [];
   string_builder.push('```');
   for (let i = 0; i < match_rows.length; i++) {
-    const match_string = `ID# ${match_rows[i].id.toString().padStart(5)} - ` +
+    let match_string = `ID# ${match_rows[i].id.toString().padStart(5)} - ` +
         `${match_rows[i].queue.name.padEnd(24)}: ` + 
         `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`;
     if (flags.includes('deadlines')) {
       const deadline_date = new Date(match_rows[i].created_at);
       deadline_date.setDate(deadline_date.getDate() + 7);
-      match_string.concat(` ${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
+      match_string = 
+          match_string.concat(` ${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
     }
     string_builder.push(match_string);
   }
