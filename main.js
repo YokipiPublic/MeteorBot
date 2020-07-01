@@ -928,6 +928,11 @@ async function print_leaderboard(channel, queue_id) {
     ]
   });
 
+  // If no one has a user_rating yet
+  if (rating_rows.length < 1) {
+    return channel.send("This queue has no rated users yet.");
+  }
+
   // Organize information
   const usernames = [], percentiles = [], ranks = [], ratings = [], playcounts = [];
   let grank = 0, brank = 0;
@@ -952,7 +957,7 @@ async function print_leaderboard(channel, queue_id) {
   // Build string and print
   let ui = 0;
   const string_builder = [];
-  string_builder.push('- ' + queue.name);
+  string_builder.push('- ' + rating_rows[0].queues[0].name);
   string_builder.push('Rank|Name                    |Elo |Games')
   string_builder.push('Diamond '.padEnd(40, '-'));
   while (ui < percentiles.length && percentiles[ui] < .1) {

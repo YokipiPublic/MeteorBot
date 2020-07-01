@@ -13,7 +13,7 @@
   "placement_games": 10,
   "stable_k": 30,
   "placement_k": 50,
-  "max_matches": 100,
+  "max_matches": 10,
   "matchmaking_requirements": [
     2,
     21600000,
