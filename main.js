@@ -323,7 +323,7 @@ async function case_leaderboard(message, args, flags, guild, member) {
   if (queue === null)
     return channel.send('Requested queue does not exist.');
 
-  print_leaderboard(channel, queue.id);
+  print_leaderboard(channel, queue.id, false);
 }
 
 async function case_profile(message, args, flags, guild, member) {
@@ -913,7 +913,7 @@ async function confirm_match_result(channel, match_id, result) {
   update_best_player(match.queue.id);
 }
 
-async function print_leaderboard(channel, queue_id) {
+async function print_leaderboard(channel, queue_id, persistent) {
   // Fetch all users of queue, sorted by rating
   const rating_rows = await db.users.findAll({
     include: [{
@@ -957,7 +957,7 @@ async function print_leaderboard(channel, queue_id) {
   // Build string and print
   let ui = 0;
   const string_builder = [];
-  string_builder.push('- ' + rating_rows[0].queues[0].name);
+  if (!persistent) string_builder.push('- ' + rating_rows[0].queues[0].name);
   string_builder.push('Rank|Name                    |Elo |Games')
   string_builder.push('Diamond '.padEnd(40, '-'));
   while (ui < percentiles.length && percentiles[ui] < .1) {
@@ -1015,7 +1015,9 @@ async function leaderboards_print_loop(timer) {
 
     // Print leaderboards
     for (let i = 0; i < queue_rows.length; i++) {
-      await print_leaderboard(channel, queue_rows[i].id);
+      channel.send('\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-');
+      channel.send(`__**${queue_rows[i].name}**__`);
+      await print_leaderboard(channel, queue_rows[i].id, true);
     }
   });
 
