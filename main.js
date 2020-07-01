@@ -1551,15 +1551,15 @@ const matchmake = async function(queue_name) {
         let weight = 0;
         for (let k = 0; k < pending_matches[i].length; k++) {
           weight *= config.max_matches;
-          if (pending_matches[i][k].user1_id === lfm_rows[j].user.id ||
-              pending_matches[i][k].user2_id === lfm_rows[j].user.id) weight += 1;
+          if (pending_matches[i][k].user1.id === lfm_rows[j].user.id ||
+              pending_matches[i][k].user2.id === lfm_rows[j].user.id) weight += 1;
           weight *= config.max_matches;
         }
         for (let k = 0; k < 5-pending_matches[i].length; k++) {
           weight *= config.max_matches;
           if (k < recent_matches[i].length &&
-              (recent_matches[i][k].user1_id === lfm_rows[j].user.id ||
-              recent_matches[i][k].user2_id === lfm_rows[j].user.id)) weight += 1;
+              (recent_matches[i][k].user1.id === lfm_rows[j].user.id ||
+              recent_matches[i][k].user2.id === lfm_rows[j].user.id)) weight += 1;
           weight *= config.max_matches;
         }
         const elodiff = Math.abs(percentiles[i] - percentiles[j]);
