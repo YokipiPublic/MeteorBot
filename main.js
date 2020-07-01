@@ -788,6 +788,10 @@ async function case_clearlocks(message, args, flags, guild, member) {
   matchmaker_locks.splice(0, matchmaker_locks.length);
 }
 
+async function case_printlastmatchmake(message, args, flags, guild, member) {
+  message.channel.send(last_edges.toString());
+}
+
 async function case_help(message, args, flags, guild, member) {
   const channel = client.channels.cache.get(config.help_channel);
   message.channel.send(`Please check the pinned message under ${channel}.`);
@@ -1337,6 +1341,18 @@ client.on('message', async (message) => {
       case_clearlocks(message, args, flags, guild, member);
       break;
 
+    // Prints edge graph of last matchmake run
+    case 'printlastmatchmake':
+      if (message.guild === undefined)
+        return message.channel.send(err.dm_disallowed);
+      if (!member.roles.cache.has(config.admin_role))
+        return message.channel.send(err.insufficient_privilege);
+      if (args.length !== 0)
+        return message.channel.send(err.number_of_arguments);
+
+      case_printlastmatchmake(message, args, flags, guild, member);
+      break;
+
     // SOS
     case 'help': case 'commands': case '?': case 'sos':
       case_help(message, args, flags, guild, member);
@@ -1381,6 +1397,9 @@ const make_match = async function(user1, elo1, user2, elo2) {
 
 // Locks for matchmaker
 const matchmaker_locks = [];
+
+// Last edge graph made
+let last_edges = [];
 
 // Matchmaker function
 const matchmake = async function(queue_name) {
@@ -1552,6 +1571,7 @@ const matchmake = async function(queue_name) {
             Math.max(weights[i][j], weights[j][i])]);
       }
     }
+    last_edges = edges;
 
     // Make matches
     const results = blossom(edges);
@@ -1723,4 +1743,4 @@ client.on('messageReactionAdd', async (reaction, user) => {
   handle_match_confirmation_reaction(reaction, user);
 });
 
-//client.login(token);
+client.login(token);
