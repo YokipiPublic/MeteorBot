@@ -996,7 +996,7 @@ async function print_leaderboard(channel, queue_id) {
 async function leaderboards_print_loop(timer) {
   // Get channel and clear messages
   const channel = client.channels.cache.get(config.leaderboards_channel);
-  channel.fetchMessages().then((msgs) => {
+  channel.messages.fetch().then(async (msgs) => {
     channel.bulkDelete(msgs);
 
     // Get all active queues
@@ -1189,7 +1189,7 @@ client.on('message', async (message) => {
       break;
 
     // Used to report results of a match
-    case 'result': case 'r':
+    case 'result': case 'report': case 'r':
       if (message.guild === undefined)
         return message.channel.send(err.dm_disallowed);
       if (args.length !== 2)
@@ -1723,4 +1723,4 @@ client.on('messageReactionAdd', async (reaction, user) => {
   handle_match_confirmation_reaction(reaction, user);
 });
 
-client.login(token);
+//client.login(token);
