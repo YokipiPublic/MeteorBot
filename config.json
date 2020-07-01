@@ -8,6 +8,8 @@
   "match_channel": "709607976637562910",
   "results_channel": "709605114809286697",
   "approvals_channel": "717429312248086528",
+  "leaderboards_channel": "727787684604674078",
+  "help_channel": "709507173473845318",
   "placement_games": 10,
   "stable_k": 30,
   "placement_k": 50,

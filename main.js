@@ -308,104 +308,29 @@ async function case_result(message, args, flags, guild, member) {
 
   // Not a valid entry
   } else {
-    return channel.send('Please enter a valid result.');
+    return message.channel.send('Please enter a valid result.');
   }
 }
 
 async function case_leaderboard(message, args, flags, guild, member) {
+  // If --dm, send all replies via DM
+  const channel = flags.includes('dm') ? message.author : message.channel;
+
   // Check that queue exists
   const queue = await db.queues.findOne({
     where: {lowercase_name: args[0].toLowerCase()},
   });
   if (queue === null)
-    return message.channel.send('Requested queue does not exist.');
+    return channel.send('Requested queue does not exist.');
 
-  // Fetch all users of queue, sorted by rating
-  const rating_rows = await db.users.findAll({
-    include: [{
-      model: db.queues,
-      where: {lowercase_name: args[0].toLowerCase()},
-      through: {
-        attributes: ['rating', 'wins', 'draws', 'losses']
-      }
-    }],
-    order: [
-      [db.queues, db.user_ratings, 'rating', 'DESC']
-    ]
-  });
-
-  // Organize information
-  const usernames = [], percentiles = [], ranks = [], ratings = [], playcounts = [];
-  let grank = 0, brank = 0;
-  while (brank < rating_rows.length) {
-    if (brank === rating_rows.length-1 ||
-        rating_rows[brank].queues[0].user_ratings.rating !==
-        rating_rows[brank+1].queues[0].user_ratings.rating) {
-      for (let i = grank; i <= brank; i++) {
-        usernames[i] = rating_rows[i].amq_name;
-        percentiles[i] = (grank+brank)/2.0/(rating_rows.length-1);
-        ranks[i] = grank+1;
-        ratings[i] = rating_rows[i].queues[0].user_ratings.rating;
-        playcounts[i] = rating_rows[i].queues[0].user_ratings.wins + 
-            rating_rows[i].queues[0].user_ratings.draws +
-            rating_rows[i].queues[0].user_ratings.losses;
-      }
-      grank = brank + 1;
-    }
-    brank++;
-  }
-
-  // Build string and print
-  let ui = 0;
-  const string_builder = [];
-  string_builder.push('- ' + queue.name);
-  string_builder.push('Rank|Name                    |Elo |Games')
-  string_builder.push('Diamond '.padEnd(40, '-'));
-  while (ui < percentiles.length && percentiles[ui] < .1) {
-    string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
-        usernames[ui].padEnd(25) + ratings[ui].toString().padStart(4) + ' ' +
-        playcounts[ui].toString().padStart(5));
-    ui++;
-  }
-  string_builder.push('Platinum '.padEnd(40, '-'));
-  while (ui < percentiles.length && percentiles[ui] < .25) {
-    string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
-        usernames[ui].padEnd(25) + ratings[ui].toString().padStart(4) + ' ' +
-        playcounts[ui].toString().padStart(5));
-    ui++;
-  }
-  string_builder.push('Gold '.padEnd(40, '-'));
-  while (ui < percentiles.length && percentiles[ui] < .5) {
-    string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
-        usernames[ui].padEnd(25) + ratings[ui].toString().padStart(4) + ' ' +
-        playcounts[ui].toString().padStart(5));
-    ui++;
-  }
-  string_builder.push('Silver '.padEnd(40, '-'));
-  while (ui < percentiles.length && percentiles[ui] < .75) {
-    string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
-        usernames[ui].padEnd(25) + ratings[ui].toString().padStart(4) + ' ' +
-        playcounts[ui].toString().padStart(5));
-    ui++;
-  }
-  string_builder.push('Bronze '.padEnd(40, '-'));
-  while (ui < percentiles.length) {
-    string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
-        usernames[ui].padEnd(25) + ratings[ui].toString().padStart(4) + ' ' +
-        playcounts[ui].toString().padStart(5));
-    ui++;
-  }
-  while (string_builder.length > 0) {
-    const string_builder_segment = string_builder.splice(0, 40);
-    string_builder_segment.unshift('```diff');
-    string_builder_segment.push('```');
-    message.channel.send(string_builder_segment.join('\n'));
-  }
+  print_leaderboard(channel, queue.id);
 }
 
 async function case_profile(message, args, flags, guild, member) {
   // Check if '--full' flag is set
   const full = flags.includes('full');
+  // If --dm, send all replies via DM
+  const channel = flags.includes('dm') ? message.author : message.channel;
 
   // Fetch all queues of user, unsorted
   const ratings_rows_where = {};
@@ -428,7 +353,7 @@ async function case_profile(message, args, flags, guild, member) {
 
   // If user has no ratings yet
   if (ratings_rows.length < 1) {
-    return message.channel.send("This user has not played any games yet.");
+    return channel.send("This user has not played any games yet.");
   }
 
   // Build string and print
@@ -447,12 +372,14 @@ async function case_profile(message, args, flags, guild, member) {
           queue_rating.aborts.toString().padStart(3));
   }
   string_builder.push('```');
-  message.channel.send(string_builder.join('\n'));
+  channel.send(string_builder.join('\n'));
 }
 
 async function case_headtohead(message, args, flags, guild, member) {
   // Check if '--full' flag is set
   const full = flags.includes('full');
+  // If --dm, send all replies via DM
+  const channel = flags.includes('dm') ? message.author : message.channel;
 
   // Get all desired queues
   const queue_rows_where = {};
@@ -591,10 +518,13 @@ async function case_headtohead(message, args, flags, guild, member) {
           queue_data[i].aborts.toString().padStart(3));
   }
   string_builder.push('```');
-  message.channel.send(string_builder.join('\n'));
+  channel.send(string_builder.join('\n'));
 }
 
 async function case_queued(message, args, flags, guild, member) {
+  // If --dm, send all replies via DM
+  const channel = flags.includes('dm') ? message.author : message.channel;
+
   // Fetch all lfms for user
   const lfm_rows = await db.lfm_users.findAll({
     include: [{
@@ -607,7 +537,7 @@ async function case_queued(message, args, flags, guild, member) {
 
   // If user is not waiting in any queues
   if (lfm_rows.length < 1) {
-    return message.channel.send("You are currently not waiting in any queues.");
+    return channel.send("You are currently not waiting in any queues.");
   }
 
   // Build list of queued queues
@@ -617,11 +547,14 @@ async function case_queued(message, args, flags, guild, member) {
     string_builder.push(lfm_rows[i].queue.name);
   }
   string_builder.push('```');
-  message.channel.send('You are currently waiting in the following queues:');
-  message.channel.send(string_builder.join('\n'));
+  channel.send('You are currently waiting in the following queues:');
+  channel.send(string_builder.join('\n'));
 }
 
 async function case_pending(message, args, flags, guild, member) {
+  // If --dm, send all replies via DM
+  const channel = flags.includes('dm') ? message.author : message.channel;
+
   // Fetch all pending matches for user
   let match_rows;
   // If no argument supplied, search by author ID, otherwise use amq_name supplied
@@ -646,7 +579,7 @@ async function case_pending(message, args, flags, guild, member) {
     });
     // If user has no pending matches
     if (match_rows.length < 1) {
-      return message.channel.send('You currently have no games to play.');
+      return channel.send('You currently have no games to play.');
     }
 
   } else {
@@ -670,7 +603,7 @@ async function case_pending(message, args, flags, guild, member) {
     });
     // If user has no pending matches
     if (match_rows.length < 1) {
-      return message.channel.send('This user currently has no games to play.');
+      return channel.send('This user currently has no games to play.');
     }
   }
 
@@ -678,7 +611,7 @@ async function case_pending(message, args, flags, guild, member) {
   const string_builder = [];
   string_builder.push('```');
   for (let i = 0; i < match_rows.length; i++) {
-    let match_string = `ID# ${match_rows[i].id.toString().padStart(5)} - ` +
+    let match_string = `ID# ${match_rows[i].id.toString().padStart(6)} - ` +
         `${match_rows[i].queue.name.padEnd(16)}: ` + 
         `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`;
     if (flags.includes('deadlines')) {
@@ -695,8 +628,8 @@ async function case_pending(message, args, flags, guild, member) {
     string_builder.push(match_string);
   }
   string_builder.push('```');
-  message.channel.send('This user has the following matches to play:');
-  message.channel.send(string_builder.join('\n'));
+  channel.send('This user has the following matches to play:');
+  channel.send(string_builder.join('\n'));
 }
 
 async function case_title(message, args, flags, guild, member) {
@@ -821,6 +754,10 @@ async function case_retirequeue(message, args, flags, guild, member) {
   console.log('Queue retired');
 }
 
+async function case_startprintingleaderboards(message, args, flags, guild, member) {
+  leaderboards_print_loop(args[0]);
+}
+
 async function case_setmatchmakingrequirements(message, args, flags, guild, member) {
   // TODO: Input validation?
   for (let i = 0; i < args.length; i++) {
@@ -852,7 +789,8 @@ async function case_clearlocks(message, args, flags, guild, member) {
 }
 
 async function case_help(message, args, flags, guild, member) {
-  message.channel.send('Please check the pinned message under #bot_commands.');
+  const channel = client.channels.cache.get(config.help_channel);
+  message.channel.send(`Please check the pinned message under ${channel}.`);
 }
 
 async function confirm_match_result(channel, match_id, result) {
@@ -935,7 +873,8 @@ async function confirm_match_result(channel, match_id, result) {
     channel.send(
       `${client.users.cache.get(user1.discord_id)} ` +
       `${client.users.cache.get(user2.discord_id)} ` +
-      `Result for Match ${match_id} recorded as a win for ${result}.`);
+      `Result for Match ${match_id} (${match.queue.name}) ` +
+      `recorded as a win for ${result}.`);
   // If result is a draw
   } else if (winner === 'draw' || winner === 'tie' || winner === 'stalemate') {
     match.update({
@@ -959,7 +898,8 @@ async function confirm_match_result(channel, match_id, result) {
     channel.send(
       `${client.users.cache.get(user1.discord_id)} ` +
       `${client.users.cache.get(user2.discord_id)} ` +
-      `Result for Match ${match_id} recorded as a draw.`);
+      `Result for Match ${match_id} (${match.queue.name}) ` +
+      `recorded as a draw.`);
   // Otherwise, there's a problem
   } else {
     console.log('ERROR: Match result unexpected after confirmation step')
@@ -967,6 +907,111 @@ async function confirm_match_result(channel, match_id, result) {
   }
 
   update_best_player(match.queue.id);
+}
+
+async function print_leaderboard(channel, queue_id) {
+  // Fetch all users of queue, sorted by rating
+  const rating_rows = await db.users.findAll({
+    include: [{
+      model: db.queues,
+      where: {id: queue_id},
+      through: {
+        attributes: ['rating', 'wins', 'draws', 'losses']
+      }
+    }],
+    order: [
+      [db.queues, db.user_ratings, 'rating', 'DESC']
+    ]
+  });
+
+  // Organize information
+  const usernames = [], percentiles = [], ranks = [], ratings = [], playcounts = [];
+  let grank = 0, brank = 0;
+  while (brank < rating_rows.length) {
+    if (brank === rating_rows.length-1 ||
+        rating_rows[brank].queues[0].user_ratings.rating !==
+        rating_rows[brank+1].queues[0].user_ratings.rating) {
+      for (let i = grank; i <= brank; i++) {
+        usernames[i] = rating_rows[i].amq_name;
+        percentiles[i] = (grank+brank)/2.0/(rating_rows.length-1);
+        ranks[i] = grank+1;
+        ratings[i] = rating_rows[i].queues[0].user_ratings.rating;
+        playcounts[i] = rating_rows[i].queues[0].user_ratings.wins + 
+            rating_rows[i].queues[0].user_ratings.draws +
+            rating_rows[i].queues[0].user_ratings.losses;
+      }
+      grank = brank + 1;
+    }
+    brank++;
+  }
+
+  // Build string and print
+  let ui = 0;
+  const string_builder = [];
+  string_builder.push('- ' + queue.name);
+  string_builder.push('Rank|Name                    |Elo |Games')
+  string_builder.push('Diamond '.padEnd(40, '-'));
+  while (ui < percentiles.length && percentiles[ui] < .1) {
+    string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
+        usernames[ui].padEnd(25) + ratings[ui].toString().padStart(4) + ' ' +
+        playcounts[ui].toString().padStart(5));
+    ui++;
+  }
+  string_builder.push('Platinum '.padEnd(40, '-'));
+  while (ui < percentiles.length && percentiles[ui] < .25) {
+    string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
+        usernames[ui].padEnd(25) + ratings[ui].toString().padStart(4) + ' ' +
+        playcounts[ui].toString().padStart(5));
+    ui++;
+  }
+  string_builder.push('Gold '.padEnd(40, '-'));
+  while (ui < percentiles.length && percentiles[ui] < .5) {
+    string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
+        usernames[ui].padEnd(25) + ratings[ui].toString().padStart(4) + ' ' +
+        playcounts[ui].toString().padStart(5));
+    ui++;
+  }
+  string_builder.push('Silver '.padEnd(40, '-'));
+  while (ui < percentiles.length && percentiles[ui] < .75) {
+    string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
+        usernames[ui].padEnd(25) + ratings[ui].toString().padStart(4) + ' ' +
+        playcounts[ui].toString().padStart(5));
+    ui++;
+  }
+  string_builder.push('Bronze '.padEnd(40, '-'));
+  while (ui < percentiles.length) {
+    string_builder.push(ranks[ui].toString().padStart(4) + ' ' +
+        usernames[ui].padEnd(25) + ratings[ui].toString().padStart(4) + ' ' +
+        playcounts[ui].toString().padStart(5));
+    ui++;
+  }
+  while (string_builder.length > 0) {
+    const string_builder_segment = string_builder.splice(0, 40);
+    string_builder_segment.unshift('```diff');
+    string_builder_segment.push('```');
+    channel.send(string_builder_segment.join('\n'));
+  }
+}
+
+async function leaderboards_print_loop(timer) {
+  // Get channel and clear messages
+  const channel = client.channels.cache.get(config.leaderboards_channel);
+  channel.fetchMessages().then((msgs) => {
+    channel.bulkDelete(msgs);
+
+    // Get all active queues
+    const queue_rows = await db.queues.findAll({
+      where: {expired: false}
+    });
+
+    // Print leaderboards
+    for (let i = 0; i < queue_rows.length; i++) {
+      await print_leaderboard(channel, queue_rows[i].id);
+    }
+  });
+
+  // Loop on timer
+  setTimeout(leaderboards_print_loop, timer, timer);
 }
 
 // Function for determining top of ladder
@@ -1120,7 +1165,7 @@ client.on('message', async (message) => {
       break;
 
     // Used to reject list pending approval
-    case 'rejectlist':
+    case 'rejectlist': case 'reject': case 'rl':
       if (message.guild === undefined)
         return message.channel.send(err.dm_disallowed);
       if (!member.roles.cache.has(config.admin_role))
@@ -1132,7 +1177,7 @@ client.on('message', async (message) => {
       break;
 
     // Used to accept list pending approval
-    case 'acceptlist': case 'approvelist':
+    case 'acceptlist': case 'approvelist': case 'accept': case 'approve': case 'al':
       if (message.guild === undefined)
         return message.channel.send(err.dm_disallowed);
       if (!member.roles.cache.has(config.admin_role))
@@ -1236,6 +1281,18 @@ client.on('message', async (message) => {
       case_retirequeue(message, args, flags, guild, member);
       break;
 
+    // Starts timeout for periodic printing of leaderboards
+    case 'startprintingleaderboards':
+      if (message.guild === undefined)
+        return message.channel.send(err.dm_disallowed);
+      if (!member.roles.cache.has(config.admin_role))
+        return message.channel.send(err.insufficient_privilege);
+      if (args.length !== 1)
+        return message.channel.send(err.number_of_arguments);
+
+      case_startprintingleaderboards(message, args, flags, guild, member);
+      break;
+
     // Sets matchmaking conditions
     case 'setmatchmakingrequirements':
       if (message.guild === undefined)
@@ -1304,7 +1361,7 @@ const make_match = async function(user1, elo1, user2, elo2) {
 
     // Notify matchmade players
     client.channels.cache.get(config.match_channel).send(
-        `Match ID# \`${match.id.toString().padStart(5)}\` - ` +
+        `Match ID# \`${match.id.toString().padStart(6)}\` - ` +
         `Queue \`${user1.queue.name.padEnd(16)}\`:` +
         `${client.users.cache.get(user1.user.discord_id)} ` +
         `${user1.user.amq_name} (${helper.what_elo(elo1)}) vs. ` +
@@ -1460,8 +1517,9 @@ const matchmake = async function(queue_name) {
     }
 
     // Build complete graph
-    const edges = [];
+    const weights = [];
     for (let i = 0; i < lfm_num; i++) {
+      weights[i] = [];
       for (let j = 0; j < lfm_num; j++) {
         if (i === j) continue;
         let weight = 0;
@@ -1484,7 +1542,14 @@ const matchmake = async function(queue_name) {
         else if (elodiff >= .3) weight += Math.pow(config.max_matches, 4);
         else if (elodiff >= .2) weight += Math.pow(config.max_matches, 2);
         else if (elodiff >= .1) weight += Math.pow(config.max_matches, 0);
-        edges.push([i, j, Math.pow(config.max_matches, 10) - weight]);
+        weights[i][j] = weight;
+      }
+    }
+    const edges = [];
+    for (let i = 0; i < lfm_num; i++) {
+      for (let j = i+1; j < lfm_num; j++) {
+        edges.push([i, j, Math.pow(config.max_matches, 10) -
+            Math.max(weights[i][j], weights[j][i])]);
       }
     }
 
