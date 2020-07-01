@@ -792,6 +792,18 @@ async function case_printlastmatchmake(message, args, flags, guild, member) {
   message.channel.send(last_edges.toString());
 }
 
+async function case_trymatchmaking(message, args, flags, guild, member) {
+  // Get all active queues
+  const queue_rows = await db.queues.findAll({
+    where: {expired: false}
+  });
+
+  // Print leaderboards
+  for (let i = 0; i < queue_rows.length; i++) {
+    matchmake(queue_rows[i].name);
+  }
+}
+
 async function case_help(message, args, flags, guild, member) {
   const channel = client.channels.cache.get(config.help_channel);
   message.channel.send(`Please check the pinned message under ${channel}.`);
@@ -1360,6 +1372,18 @@ client.on('message', async (message) => {
       case_printlastmatchmake(message, args, flags, guild, member);
       break;
 
+    // Run matchmaker on all queues
+    case 'trymatchmaking':
+      if (message.guild === undefined)
+        return message.channel.send(err.dm_disallowed);
+      if (!member.roles.cache.has(config.admin_role))
+        return message.channel.send(err.insufficient_privilege);
+      if (args.length !== 0)
+        return message.channel.send(err.number_of_arguments);
+
+      case_trymatchmaking(message, args, flags, guild, member);
+      break;
+
     // SOS
     case 'help': case 'commands': case '?': case 'sos':
       case_help(message, args, flags, guild, member);
@@ -1373,7 +1397,7 @@ client.on('message', async (message) => {
 });
 
 // Match creation function
-const make_match = async function(user1, elo1, user2, elo2) {
+async function make_match(user1, elo1, user2, elo2) {
   db.matches.create({
     result: 'PENDING',
     timestamp: db.sequelize.literal('CURRENT_TIMESTAMP')
@@ -1409,7 +1433,7 @@ const matchmaker_locks = [];
 let last_edges = [];
 
 // Matchmaker function
-const matchmake = async function(queue_name) {
+async function matchmake(queue_name) {
   // Check and acquire lock
   console.log('Running matchmaker function');
   if (matchmaker_locks[queue_name]) {
