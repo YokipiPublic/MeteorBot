@@ -179,7 +179,7 @@ async function case_result(message, args, flags, guild, member) {
     where: {id: args[0]},
     include: [{
       model: db.users,
-      as: 'user1',
+      as: 'user1'
     }, {
       model: db.users,
       as: 'user2'
@@ -1445,7 +1445,6 @@ const matchmake = async function(queue_name) {
     }
     if (!matchmakeable) {
       console.log('Matchmaking conditions not met');
-      matchmaker_locks[queue_name] = 0;
       return;
     }
 
@@ -1512,6 +1511,12 @@ const matchmake = async function(queue_name) {
           result: {[db.Sequelize.Op.ne]: 'PENDING'}
         },
         include: [{
+          model: db.users,
+          as: 'user1'
+        }, {
+          model: db.users,
+          as: 'user2'
+        }, {
           model: db.queues,
           where: {
             name: queue_name
@@ -1531,6 +1536,12 @@ const matchmake = async function(queue_name) {
           result: 'PENDING'
         },
         include: [{
+          model: db.users,
+          as: 'user1'
+        }, {
+          model: db.users,
+          as: 'user2'
+        }, {
           model: db.queues,
           where: {
             name: queue_name
