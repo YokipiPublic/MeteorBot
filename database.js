@@ -2,19 +2,28 @@
 
 const Sequelize = require('sequelize');
 
+// Production or Development?
+const env = process.env.NODE_ENV || 'dev';
+
+// Load environment variables
+if (env === 'dev') {
+  require('dotenv').config();
+}
+
 const db = {};
 
 // Connect to database
-const sequelize = new Sequelize('database', 'user', 'password', {
-  host: 'localhost',
-  dialect: 'sqlite',
-  logging: false,
-  storage: 'database.sqlite',
-  dialectOptions: {
-    charset: 'utf8',
-    collate: 'utf8_general_ci',
-  }
-});
+let sequelize;
+if (env === 'dev') {
+  sequelize = new Sequelize(process.env.DEV_DATABASE_URL, {
+    logging: false
+  });
+} else {
+  sequelize = new Sequelize(process.env.DATABASE_URL, {
+    logging: false
+  });
+}
+
 
 // Create models
 db.users = sequelize.define('users', {

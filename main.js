@@ -2,11 +2,18 @@
 
 const Discord = require('discord.js');
 const db = require('./database.js');
-const {token} = require('./token.json');
 const err = require('./error_messages.js');
 const helper = require('./helper.js');
 const fs = require('fs');
 const blossom = require('edmonds-blossom');
+
+// Production or Development?
+const env = process.env.NODE_ENV || 'dev';
+
+// Load environment variables
+if (env === 'dev') {
+  require('dotenv').config();
+}
 
 // Load settings from config.json
 const config_file = './config.json';
@@ -772,7 +779,7 @@ async function case_rawsqlite(message, args, flags, guild, member) {
   db.sequelize.query(args[0]).spread((results, metadata) => {
     const results_string = JSON.stringify(results, null, 2);
     if (results_string.length > 1950) {
-      message.channel.send('Character limit exceeded.');
+      return message.channel.send('Character limit exceeded.');
     }
     message.channel.send('```' + results_string + '```');
   });
@@ -1785,4 +1792,21 @@ client.on('messageReactionAdd', async (reaction, user) => {
   handle_match_confirmation_reaction(reaction, user);
 });
 
-client.login(token);
+// Handle shutdown commands
+process
+  .on('SIGTERM', shutdown('SIGTERM'))
+  .on('SIGINT', shutdown('SIGINT'));
+
+function shutdown(signal) {
+  return (err) => {
+    console.log(`${signal}...`);
+    if (err) console.error(err.stack || err);
+    setTimeout(() => {
+      console.log('Waited 5s, now exiting');
+      process.exit(err ? 1 : 0);
+    }, 5000).unref();
+  };
+}
+
+// Log in
+client.login(process.env.BOT_TOKEN);
