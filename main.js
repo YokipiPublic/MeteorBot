@@ -228,7 +228,7 @@ async function case_signup(message, args, flags, guild, member) {
     average_elo = 1500;
   } else {
     for (let i = 0; i < ratings_rows.length; i++) {
-      average_elo += ratings_rows[i].users[0].rating;
+      average_elo += ratings_rows[i].users[0].user_ratings.rating;
     }
     average_elo /= ratings_rows.length;
   }
