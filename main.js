@@ -180,6 +180,69 @@ async function case_acceptlist(message, args, flags, guild, member) {
   message.channel.send('Acceptance message sent to user.');
 }
 
+async function case_signup(message, args, flags, guild, member) {
+  // Fetch user
+  const user = await db.users.findOne({
+    where: {discord_id: message.author.id}
+  });
+
+  // If message author user not found
+  if (!user) {
+    return message.channel.send('You must register first. ' +
+        'Please reply with `m!register <AMQ Username>` in order to register.');
+  }
+
+  // Fetch tournament
+  const tournament = await db.tournaments.findOne({
+    where: {name: args[0]}
+  });
+
+  // If tournament not found
+  if (!tournament) {
+    return message.channel.send('This tournament does not exist.');
+  }
+
+  // Verify that user has necessary role
+  if (tournament.required_role !== null) {
+    if (!member.roles.cache.has(tournament.required_role)) {
+      return message.channel.send(
+        'Your list must be approved first before playing in this tournament. ' +
+        'Please request approval with `m!registerlist <List URL>` ' +
+        'if you have not already done so.');
+    }
+  }
+
+  // Calculate average elo
+  let average_elo = 0;
+  const ratings_rows = await db.queues.findAll({
+    where: {expired: false},
+    include: [{
+      model: db.users,
+      where: {discord_id: message.author.id},
+      through: {
+        attributes: ['rating']
+      }
+    }]
+  });
+  if (ratings_rows.length === 0) {
+    average_elo = 1500;
+  } else {
+    for (let i = 0; i < ratings_rows.length; i++) {
+      average_elo += ratings_rows[i].users[0].rating;
+    }
+    average_elo /= ratings_rows.length;
+  }
+
+  // Send sign-up to tournaments channel
+  client.channels.cache.get(config.tournaments_channel).send(
+    `${user.amq_name} (${average_elo}) is registering for '${args[0]}'.`
+  ).then((msg) => {
+    message.channel.send('Tournament registration successful.');
+  }).catch((e) => {
+    message.channel.send('Error registering for tournament.');
+  });
+}
+
 async function case_result(message, args, flags, guild, member) {
   // Fetch relevant match
   const match = await db.matches.findOne({
@@ -761,6 +824,28 @@ async function case_retirequeue(message, args, flags, guild, member) {
   console.log('Queue retired');
 }
 
+async function case_setuptournament(message, args, flags, guild, member) {
+  // Create tournament
+  db.tournaments.create({
+    name: args[0]
+  }).then(async (row) => {
+    if (args.length > 1)
+      await row.update({required_role: args[1]});
+
+    console.log(`${args[0]} tournament created`);
+    message.reply('Tournament created successfully.');
+  }).catch((e) => {
+    if (e.name === 'SequelizeUniqueConstraintError') {
+      if(e.fields.includes('name')) {
+        return message.channel.send('This tournament name is already being used.');
+      }
+    }
+    console.log(e.name);
+    console.log(e.message);
+    return message.channel.send('Error during tournament creation.');
+  });
+}
+
 async function case_startprintingleaderboards(message, args, flags, guild, member) {
   leaderboards_print_loop(args[0]);
 }
@@ -1218,6 +1303,14 @@ client.on('message', async (message) => {
       case_acceptlist(message, args, flags, guild, member);
       break;
 
+    // Used to register for special tournaments
+    case 'signup':
+      if (args.length < 1 || args.length > 2)
+        return message.channel.send(err.number_of_arguments);
+
+      case_signup(message, args, flags, guild, member);
+      break;
+
     // Used to report results of a match
     case 'result': case 'report': case 'r':
       if (message.guild === undefined)
@@ -1309,6 +1402,18 @@ client.on('message', async (message) => {
         return message.channel.send(err.number_of_arguments);
 
       case_retirequeue(message, args, flags, guild, member);
+      break;
+
+    // Creates tournament entry
+    case 'setuptournament':
+      if (message.guild === undefined)
+        return message.channel.send(err.dm_disallowed);
+      if (!member.roles.cache.has(config.admin_role))
+        return message.channel.send(err.insufficient_privilege);
+      if (args.length < 1 || args.length > 2)
+        return message.channel.send(err.number_of_arguments);
+      
+      case_setuptournament(message, args, flags, guild, member);
       break;
 
     // Starts timeout for periodic printing of leaderboards
@@ -1658,7 +1763,7 @@ async function handle_queue_reaction(reaction, user) {
           console.log('Failed to send direct message.');
         });
       user.send('Please request approval with `m!registerlist <List URL>` ' +
-          ' if you have not already done so.')
+          'if you have not already done so.')
         .catch((e) => {
           console.log('Failed to send direct message.');
         });

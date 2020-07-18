@@ -75,6 +75,18 @@ db.queues = sequelize.define('queues', {
   underscored: true,
 });
 
+db.tournaments = sequelize.define('tournaments', {
+  name: {
+    type: Sequelize.STRING,
+    unique: true,
+  },
+  required_role: {
+    type: Sequelize.STRING,
+  },
+}, {
+  underscored: true,
+});
+
 db.lfm_users = sequelize.define('lfm_users', {
   timestamp: {
     type: Sequelize.DATE,
