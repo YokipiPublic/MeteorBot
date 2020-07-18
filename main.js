@@ -235,7 +235,8 @@ async function case_signup(message, args, flags, guild, member) {
 
   // Send sign-up to tournaments channel
   client.channels.cache.get(config.tournaments_channel).send(
-    `${user.amq_name} (${average_elo}) is registering for '${args[0]}'.`
+    `${user.amq_name} (${average_elo}) is registering for '${args[0]}'.` +
+    (args.length > 1 ? ` Extra parameter: ${args[1]}` : '')
   ).then((msg) => {
     message.channel.send('Tournament registration successful.');
   }).catch((e) => {
@@ -833,7 +834,7 @@ async function case_setuptournament(message, args, flags, guild, member) {
       await row.update({required_role: args[1]});
 
     console.log(`${args[0]} tournament created`);
-    message.reply('Tournament created successfully.');
+    message.channel.send('Tournament created successfully.');
   }).catch((e) => {
     if (e.name === 'SequelizeUniqueConstraintError') {
       if(e.fields.includes('name')) {
