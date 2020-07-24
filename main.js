@@ -2161,8 +2161,8 @@ async function requeue_autoqueue(queue_name) {
       model: db.queues,
       where: {name: queue_name}
     }]
-  }).then((rows) => {
-    rows.forEach((row) => {
+  }).then(async (rows) => {
+    rows.forEach(async (row) => {
 
       // Check if already queued
       const lfm_row = await db.lfm_users.findOne({
