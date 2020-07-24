@@ -515,7 +515,7 @@ async function case_profile(message, args, flags, guild, member) {
   string_builder.push(ratings_rows[0].users[0].amq_name.padEnd(20) + ' ' + 
       average_elo.padStart(4) + ' ' +
       (total_wins + '-' + total_draws + '-' + total_losses).padStart(11) + ' ' +
-      overall_winrate.padStart(3) + '%';
+      overall_winrate.padStart(3) + '%');
   string_builder.push('------------------------------------------'); // 42
   string_builder.push('Queue           |Elo |Peak|  W|  D|  L|  A');
   for (let i = 0; i < ratings_rows.length; i++) {
