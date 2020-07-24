@@ -22,12 +22,24 @@ const config = JSON.parse(fs.readFileSync(config_file));
 // Initialize client
 const client = new Discord.Client({ partials: ['MESSAGE', 'REACTION'] });
 
+// Sleep function
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // On connect
 client.once('ready', () => {
   console.log('Connected');
   console.log(`Logged in as: ${client.user.tag}`);
+
+  // Sync to database
   db.sequelize.sync();
   console.log('Database synced');
+
+  // Start printing leaderboards
+  const ttn_hour = new Date().setMinutes(60) - new Date().getTime();
+  console.log(`Printing first leaderboards in ${ttn_hour}`);
+  leaderboards_print_loop(ttn_hour);
 });
 
 // Following are case-functions for bot-commands in main loop
@@ -44,7 +56,7 @@ async function case_register(message, args, flags, guild, member) {
       amq_name: args[0],
       lowercase_name: args[0].toLowerCase()
     }).then((row) => {
-      member.roles.add(config.tourny_role);
+      member.roles.add(config.tourney_role);
       console.log(`${args[0]} registered`);
       message.reply(`${args[0]} successfully registered. ` +
           'Please use `m!list <List URL>` to have your list verified ' +
@@ -121,11 +133,17 @@ async function case_registerlist(message, args, flags, guild, member) {
         'Please reply with `m!register <AMQ Username>` in order to register.');
   }
 
+  // Check if enclosed in angle brackets
+  let list_url = args[0];
+  if (list_url.startsWith('<') && list_url.endsWith('>')) {
+    list_url = list_url.slice(1, -1);
+  }
+
   // Send embed to approvals channel
   const embed = new Discord.MessageEmbed()
     .setTitle(args[0])
     .setColor('#2ce660')
-    .setURL(args[0])
+    .setURL(list_url)
     .setDescription(`${message.author.username} (${user.amq_name}) ` +
         `is requesting list approval`);
   client.channels.cache.get(config.approvals_channel).send(embed).then((msg) => {
@@ -232,11 +250,12 @@ async function case_signup(message, args, flags, guild, member) {
     }
     average_elo /= ratings_rows.length;
   }
+  average_elo = Math.round(average_elo);
 
   // Send sign-up to tournaments channel
   client.channels.cache.get(config.tournaments_channel).send(
     `${user.amq_name} (${average_elo}) is registering for '${args[0]}'.` +
-    (args.length > 1 ? ` Extra parameter: ${args[1]}` : '')
+    (args.length > 1 ? ` Extra parameter: ${args[1]}` : 'Extra parameter: N/A')
   ).then((msg) => {
     message.channel.send('Tournament registration successful.');
   }).catch((e) => {
@@ -341,7 +360,6 @@ async function case_result(message, args, flags, guild, member) {
       return message.channel.send(err.insufficient_privilege);
 
     match.update({
-      timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
       result: 'ABORT',
       rating_change1: 0,
       rating_change2: 0
@@ -387,6 +405,51 @@ async function case_leaderboard(message, args, flags, guild, member) {
   // If --dm, send all replies via DM
   const channel = flags.includes('dm') ? message.author : message.channel;
 
+  // Special case leaderboards
+  // Total Games
+  if (args[0].toLowerCase() === 'total games') {
+    const user_rows = await db.users.findAll({
+      include: [{
+        model: db.queues,
+        through: {
+          attributes: ['wins', 'draws', 'losses']
+        }
+      }]
+    });
+
+    // Add WDL for each user
+    let user_names = [];
+    let user_games = [];
+    for (let i = 0; i < user_rows.length; i++) {
+      user_names[i] = user_rows.amq_name;
+      user_games[i] = 0;
+      for (let j = 0; j < user_rows.queues.length; j++) {
+        user_games[i] += user_rows.queues[j].wins +
+                          user_rows.queues[j].draws +
+                          user_rows.queues[j].losses;
+      }
+    }
+
+    // Sort both arrays by total games played, descending
+    user_names = user_names.slice().sort((a, b) => {
+      return user_games[user_names.indexOf(b)] - user_games[user_names.indexOf(a)];
+    });
+    user_games = user_games.sort((a, b) => {
+      return b - a;
+    });
+
+    // Print top 20 players
+    const string_builder = [];
+    string_builder.push('```diff');
+    string_builder.push('- Total Games');
+    string_builder.push('Name                    |Games')
+    for (let i = 0; i < 20; i++) {
+      string_builder.push(user_names[ui].padEnd(25) + user_games.padStart(5));
+    }
+    string_builder.push('```');
+    return message.channel.send(string_builder_segment.join('\n'));
+  }
+
   // Check that queue exists
   const queue = await db.queues.findOne({
     where: {lowercase_name: args[0].toLowerCase()},
@@ -419,7 +482,10 @@ async function case_profile(message, args, flags, guild, member) {
       through: {
         attributes: ['rating', 'wins', 'draws', 'losses', 'aborts', 'peak_rating']
       }
-    }]
+    }],
+    order: [
+      ['id', 'ASC']
+    ]
   });
 
   // If user has no ratings yet
@@ -427,10 +493,30 @@ async function case_profile(message, args, flags, guild, member) {
     return channel.send("This user has not played any games yet.");
   }
 
+  // Calculate overall record and average elo
+  let total_wins = 0;
+  let total_draws = 0;
+  let total_losses = 0;
+  let average_elo = 0;
+  for (let i = 0; i < ratings_rows.length; i++) {
+    average_elo += ratings_rows[i].users[0].user_ratings.rating;
+    total_wins = ratings_rows[i].users[0].user_ratings.wins;
+    total_draws = ratings_rows[i].users[0].user_ratings.draws;
+    total_losses = ratings_rows[i].users[0].user_ratings.losses;
+  }
+  average_elo /= ratings_rows.length;
+  average_elo = Math.round(average_elo);
+  let overall_winrate = total_wins + 0.5*total_draws /
+      (total_wins + total_draws + total_losses);
+  overall_winrate = Math.round(100 * overall_winrate);
+
   // Build string and print
   const string_builder = [];
-  string_builder.push('```');
-  string_builder.push(ratings_rows[0].users[0].amq_name);
+  string_builder.push(ratings_rows[0].users[0].amq_name.padEnd(20) + ' ' + 
+      average_elo.padStart(4) + ' ' +
+      (total_wins + '-' + total_draws + '-' + total_losses).padStart(11) + ' ' +
+      overall_winrate.padStart(3) + '%';
+  string_builder.push('------------------------------------------'); // 42
   string_builder.push('Queue           |Elo |Peak|  W|  D|  L|  A');
   for (let i = 0; i < ratings_rows.length; i++) {
     const queue_rating = ratings_rows[i].users[0].user_ratings;
@@ -442,8 +528,12 @@ async function case_profile(message, args, flags, guild, member) {
           queue_rating.losses.toString().padStart(3) + ' ' +
           queue_rating.aborts.toString().padStart(3));
   }
-  string_builder.push('```');
-  channel.send(string_builder.join('\n'));
+  while (string_builder.length > 0) {
+    const string_builder_segment = string_builder.splice(0, 40);
+    string_builder_segment.unshift('```');
+    string_builder_segment.push('```');
+    await channel.send(string_builder_segment.join('\n'));
+  }
 }
 
 async function case_headtohead(message, args, flags, guild, member) {
@@ -456,16 +546,24 @@ async function case_headtohead(message, args, flags, guild, member) {
   const queue_rows_where = {};
   if (!full) queue_rows_where.expired = false;
   const queue_rows = await db.queues.findAll({
-    where: queue_rows_where
+    where: queue_rows_where,
+    order: [
+      ['id', 'ASC']
+    ]
   });
 
   // Get WDLA for all relevant queues
   const queue_data = [];
+  let total_wins = 0;
+  let total_draws = 0;
+  let total_losses = 0;
+  let total_elo_gl = 0;
   for (let i = 0; i < queue_rows.length; i++) {
     queue_data[i] = {};
     queue_data[i].name = queue_rows[i].name;
-    queue_data[i].wins = await db.matches.count({
+    const match_rows = await db.matches.count({
       where: {
+        result: {[db.Sequelize.Op.ne]: 'PENDING'},
         [db.Sequelize.Op.or]: [
           {[db.Sequelize.Op.and]: [
             {'$user1.lowercase_name$': args[0].toLowerCase()},
@@ -475,8 +573,7 @@ async function case_headtohead(message, args, flags, guild, member) {
             {'$user1.lowercase_name$': args[1].toLowerCase()},
             {'$user2.lowercase_name$': args[0].toLowerCase()}
           ]},
-        ],
-        result: args[0].toLowerCase()
+        ]
       },
       include: [{
         model: db.users,
@@ -491,105 +588,62 @@ async function case_headtohead(message, args, flags, guild, member) {
         }
       }]
     });
-    queue_data[i].draws = await db.matches.count({
-      where: {
-        [db.Sequelize.Op.or]: [
-          {[db.Sequelize.Op.and]: [
-            {'$user1.lowercase_name$': args[0].toLowerCase()},
-            {'$user2.lowercase_name$': args[1].toLowerCase()}
-          ]},
-          {[db.Sequelize.Op.and]: [
-            {'$user1.lowercase_name$': args[1].toLowerCase()},
-            {'$user2.lowercase_name$': args[0].toLowerCase()}
-          ]},
-        ],
-        result: 'DRAW'
-      },
-      include: [{
-        model: db.users,
-        as: 'user1'
-      }, {
-        model: db.users,
-        as: 'user2'
-      }, {
-        model: db.queues,
-        where: {
-          id: queue_rows[i].id
-        }
-      }]
-    });
-    queue_data[i].losses = await db.matches.count({
-      where: {
-        [db.Sequelize.Op.or]: [
-          {[db.Sequelize.Op.and]: [
-            {'$user1.lowercase_name$': args[0].toLowerCase()},
-            {'$user2.lowercase_name$': args[1].toLowerCase()}
-          ]},
-          {[db.Sequelize.Op.and]: [
-            {'$user1.lowercase_name$': args[1].toLowerCase()},
-            {'$user2.lowercase_name$': args[0].toLowerCase()}
-          ]},
-        ],
-        result: args[1].toLowerCase()
-      },
-      include: [{
-        model: db.users,
-        as: 'user1'
-      }, {
-        model: db.users,
-        as: 'user2'
-      }, {
-        model: db.queues,
-        where: {
-          id: queue_rows[i].id
-        }
-      }]
-    });
-    queue_data[i].aborts = await db.matches.count({
-      where: {
-        [db.Sequelize.Op.or]: [
-          {[db.Sequelize.Op.and]: [
-            {'$user1.lowercase_name$': args[0].toLowerCase()},
-            {'$user2.lowercase_name$': args[1].toLowerCase()}
-          ]},
-          {[db.Sequelize.Op.and]: [
-            {'$user1.lowercase_name$': args[1].toLowerCase()},
-            {'$user2.lowercase_name$': args[0].toLowerCase()}
-          ]},
-        ],
-        result: 'ABORT'
-      },
-      include: [{
-        model: db.users,
-        as: 'user1'
-      }, {
-        model: db.users,
-        as: 'user2'
-      }, {
-        model: db.queues,
-        where: {
-          id: queue_rows[i].id
-        }
-      }]
-    });
+
+    queue_data[i].wins = 0;
+    queue_data[i].draws = 0;
+    queue_data[i].losses = 0;
+    queue_data[i].aborts = 0;
+    queue_data[i].elo_gl = 0;
+    for (let j = 0; j < match_rows.length; j++) {
+      if (match_rows[j].result === args[0].toLowerCase()) queue_data[i].wins++;
+      else if (match_rows[j].result === 'DRAW') queue_data[i].draws++;
+      else if (match_rows[j].result === args[1].toLowerCase()) queue_data[i].losses++;
+      else if (match_rows[j].result === 'ABORT') queue_data[i].aborts++;
+      else console.log('ERROR: Unexpected match result detected while checking hth');
+
+      queue_data[i].elo_gl += 
+          match_rows[j].user1.lowercase_name === args[0].toLowerCase() ?
+          match_rows[j].rating_change1 : match_rows[j].rating_change2;
+    }
+
+    total_wins += queue_data[i].wins;
+    total_draws += queue_data[i].draws;
+    total_losses += queue_data[i].losses;
+    total_elo_gl += queue_data[i].elo_gl;
   }
+
+  // Calculate overall winrate
+  let overall_winrate = total_wins + 0.5*total_draws /
+      (total_wins + total_draws + total_losses);
+  overall_winrate = Math.round(100 * overall_winrate);
 
   // Build string and print
   const string_builder = [];
-  string_builder.push('```');
   string_builder.push(`${args[0]}'s record against ${args[1]}`);
-  string_builder.push('Queue           |  W|  D|  L|  A');
+  string_builder.push(
+      (total_elo_gl >= 0 ? `"+${total_elo_gl}"` : `'${total_elo_gl}'`).padStart(23) + ' ' +
+      (total_wins + '-' + total_draws + '-' + total_losses).padStart(11) + ' ' +
+      overall_winrate.padStart(3) + '%';
+  string_builder.push('----------------------------------------') // 40
+  string_builder.push('Queue           |  W|  D|  L|  A|Elo +/-');
   for (let i = 0; i < queue_data.length; i++) {
     if (queue_data[i].wins + queue_data[i].draws +
         queue_data[i].losses + queue_data[i].aborts < 1) continue;
+
     string_builder.push(queue_data[i].name.padEnd(16) + ' ' +
           queue_data[i].wins.toString().padStart(3) + ' ' +
           queue_data[i].draws.toString().padStart(3) + ' ' +
           queue_data[i].losses.toString().padStart(3) + ' ' +
-          queue_data[i].aborts.toString().padStart(3));
+          queue_data[i].aborts.toString().padStart(3)) + ' ' +
+          (queue_data[i].elo_gl >= 0 ? `"+${queue_data[i].elo_gl}"` :
+              `'${queue_data[i].elo_gl}'`).padStart(7);
   }
-  string_builder.push('```');
-  channel.send(string_builder.join('\n'));
+  while (string_builder.length > 0) {
+    const string_builder_segment = string_builder.splice(0, 40);
+    string_builder_segment.unshift('```ml');
+    string_builder_segment.push('```');
+    await channel.send(string_builder_segment.join('\n'));
+  }
 }
 
 async function case_queued(message, args, flags, guild, member) {
@@ -646,7 +700,10 @@ async function case_pending(message, args, flags, guild, member) {
         as: 'user2'
       }, {
         model: db.queues,
-      }]
+      }],
+      order: [
+        ['id', 'ASC']
+      ]
     });
     // If user has no pending matches
     if (match_rows.length < 1) {
@@ -669,8 +726,11 @@ async function case_pending(message, args, flags, guild, member) {
         model: db.users,
         as: 'user2'
       }, {
-        model: db.queues,
-      }]
+        model: db.queues
+      }],
+      order: [
+        ['id', 'ASC']
+      ]
     });
     // If user has no pending matches
     if (match_rows.length < 1) {
@@ -680,11 +740,15 @@ async function case_pending(message, args, flags, guild, member) {
 
   // Build list of pending matches
   const string_builder = [];
-  string_builder.push('```');
   for (let i = 0; i < match_rows.length; i++) {
+    const rank1_abbr = match_rows[i].rank1 === null ? '?' : 
+        match_rows[i].rank1.substring(0, 1);
+    const rank2_abbr = match_rows[i].rank2 === null ? '?' : 
+        match_rows[i].rank2.substring(0, 1);
     let match_string = `ID# ${match_rows[i].id.toString().padStart(6)} - ` +
         `${match_rows[i].queue.name.padEnd(16)}: ` + 
-        `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`;
+        `${match_rows[i].user1.amq_name}(${rank1_abbr}) vs. ` +
+        `${match_rows[i].user2.amq_name}(${rank2_abbr})`;
     if (flags.includes('deadlines')) {
       match_string = match_string.padEnd(75);
       if (!match_rows[i].timestamp) {
@@ -698,9 +762,209 @@ async function case_pending(message, args, flags, guild, member) {
     }
     string_builder.push(match_string);
   }
-  string_builder.push('```');
   channel.send('This user has the following matches to play:');
-  channel.send(string_builder.join('\n'));
+  while (string_builder.length > 0) {
+    const string_builder_segment = string_builder.splice(0, 20);
+    string_builder_segment.unshift('```');
+    string_builder_segment.push('```');
+    await channel.send(string_builder_segment.join('\n'));
+  }
+}
+
+async function case_matchhistory(message, args, flags, guild, member) {
+  // If --dm, send all replies via DM
+  const channel = flags.includes('dm') ? message.author : message.channel;
+
+  // Check if searching by author ID or amq_name
+  const search_by_author = !(args.length > 0 && !Number.isInteger(args[0]));
+  const page = args.length > 0 && Number.isInteger(args[args.length-1]) ?
+      args[args.length-1] : 1;
+
+  // Fetch all user and non-pending matches for user
+  let user_row;
+  let match_rows;
+  if (search_by_author) {
+    user_row = await db.users.findOne({where: {discord_id: message.author.id}});
+    match_rows = await db.matches.findAll({
+      where: {
+        result: {[db.Sequelize.Op.ne]: 'PENDING'},
+        [db.Sequelize.Op.or]: [
+          {'$user1.discord_id$': message.author.id},
+          {'$user2.discord_id$': message.author.id}
+        ]
+      },
+      include: [{
+        model: db.users,
+        as: 'user1'
+      }, {
+        model: db.users,
+        as: 'user2'
+      }, {
+        model: db.queues,
+      }],
+      order: [
+        ['updated_at', 'DESC']
+      ],
+      limit: 40,
+      offset: 40*(page-1)
+    });
+  } else {
+    user_row = await db.users.findOne({where: {lowercase_name: args[0].toLowerCase()}});
+    match_rows = await db.matches.findAll({
+      where: {
+        result: {[db.Sequelize.Op.ne]: 'PENDING'},
+        [db.Sequelize.Op.or]: [
+          {'$user1.lowercase_name$': args[0].toLowerCase()},
+          {'$user2.lowercase_name$': args[0].toLowerCase()}
+        ]
+      },
+      include: [{
+        model: db.users,
+        as: 'user1'
+      }, {
+        model: db.users,
+        as: 'user2'
+      }, {
+        model: db.queues
+      }],
+      order: [
+        ['updated_at', 'DESC']
+      ],
+      limit: 40,
+      offset: 40*(page-1)
+    });
+  }
+
+  // If user has no completed matches in range
+  if (match_rows.length < 1) {
+    return channel.send('No results found.');
+  }
+
+  // Build list of completed matches
+  const string_builder = [];
+  for (let i = 0; i < match_rows.length; i++) {
+    let match_opponent = user_row.id === match_rows[i].user1.id ?
+        match_rows[i].user2.amq_name : match_rows[i].user1.amq_name;
+    let match_elo_change = user_row.id === match_rows[i].user1.id ?
+        match_rows[i].rating_change1 : match_rows[i].rating_change2;
+    let match_result;
+    if (match_rows[i].result === match_opponent.toLowerCase()) {
+      match_result = 'LOSS';
+    } else if (match_rows[i].result === user_row.lowercase_name) {
+      match_result = 'WIN';
+    } else {
+      match_result = match_rows[i].result;
+    }
+    let match_string = `ID# ${match_rows[i].id.toString().padStart(6)} - ` +
+        `${match_rows[i].queue.name.padEnd(16)}: vs. ` + 
+        `${match_opponent.padEnd(20)} ${match_result.padEnd(6)} ` +
+        (match_elo_change >= 0 ? `"+${match_elo_change}"` : `'${match_elo_change}'`);
+    string_builder.push(match_string);
+  }
+  channel.send(`Page ${page} of ${user_row.amq_name}'s:`);
+  string_builder.unshift('```ml');
+  string_builder.push('```');
+  channel.send(string_builder_segment.join('\n'));
+}
+
+async function case_oldestmatches(message, args, flags, guild, member) {
+  const match_rows = await db.matches.findAll({
+    where: {
+      result: 'PENDING'
+    },
+    include: [{
+      model: db.users,
+      as: 'user1'
+    }, {
+      model: db.users,
+      as: 'user2'
+    }, {
+      model: db.queues
+    }],
+    order: [
+      ['created_at', 'ASC']
+    ],
+    limit: 20
+  });
+  // If there are no pending matches
+  if (match_rows.length < 1) {
+    return channel.send('There are currently no pending matches. Congratulations?');
+  }
+
+  // Build list of pending matches
+  const string_builder = [];
+  string_builder.push('```');
+  for (let i = 0; i < match_rows.length; i++) {
+    let match_string = `ID# ${match_rows[i].id.toString().padStart(6)} - ` +
+        `${match_rows[i].queue.name.padEnd(16)}: ` + 
+        `${match_rows[i].user1.amq_name} vs. ${match_rows[i].user2.amq_name}`;
+    match_string = match_string.padEnd(75);
+    if (!match_rows[i].timestamp) {
+      match_string = match_string.concat('No Deadline Set');
+    } else {
+      const deadline_date = new Date(match_rows[i].timestamp);
+      deadline_date.setDate(deadline_date.getDate() + 7);
+      match_string = match_string.concat(
+          `${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
+    }
+    string_builder.push(match_string);
+  }
+  string_builder.push('```');
+  message.channel.send(string_builder.join('\n'));
+}
+
+async function case_autoqueue(message, args, flags, guild, member) {
+  try {
+    // Fetch user
+    await user_row = db.users.findOne({
+      where: {discord_id: message.author.id}
+    });
+    if (!user_row) {
+      return message.channel.send('You must register first. ' +
+          'Please reply with `m!register <AMQ Username>` in order to register.');
+    }
+
+    // Fetch queue
+    await queue_row = db.queues.findOne({
+      where: {lowercase_name: args[0].toLowerCase()}
+    });
+    if (!queue_row) {
+      return message.channel.send('Requested queue does not exist.');
+    }
+
+    // Check if autoqueue entry already exists
+    const aq_row = db.autoqueues.findOne({
+      include: [{
+        model: db.users,
+        where: {
+          id: user_row.id
+        }
+      }, {
+        model: db.queues,
+        where: {
+          id: queue_row.id
+        }
+      }]
+    });
+
+    // If so, delete it
+    if (aq_row) {
+      aq_row.destroy();
+      return message.channel.send(`Autoqueue for ${args[0]} disabled.`);
+    }
+
+    // Else, create a new autoqueue entry
+    db.autoqueues.create().then((new_row) => {
+      new_row.setUser(user_row);
+      new_row.setQueue(queue_row);
+      return message.channel.send(`Autoqueue for ${args[0]} enabled.`);
+    });
+
+  } catch (e) {
+    console.log(e.name);
+    console.log(e.message);
+    return message.channel.send('Error toggling autoqueue.');
+  }
 }
 
 async function case_title(message, args, flags, guild, member) {
@@ -814,10 +1078,21 @@ async function case_retirequeue(message, args, flags, guild, member) {
   const lfm_rows = await db.lfm_users.findAll({
     include: [{
       model: db.queues,
-      where: {name: queue_name}
+      where: {name: queue.name}
     }]
   });
   lfm_rows.forEach((row) => {
+    row.destroy();
+  });
+
+  // Delete all autoqueue entries
+  const aq_rows = await db.autoqueues.findAll({
+    include: [{
+      model: db.queues,
+      where: {name: queue.name}
+    }]
+  });
+  aq_rows.forEach((row) => {
     row.destroy();
   });
 
@@ -868,6 +1143,10 @@ async function case_rawsqlite(message, args, flags, guild, member) {
       return message.channel.send('Character limit exceeded.');
     }
     message.channel.send('```' + results_string + '```');
+  }).catch((e) => {
+    console.log(e);
+    message.channel.send('Error running sqlite query.');
+    message.channel.send('```' + e + '```');
   });
 }
 
@@ -891,9 +1170,76 @@ async function case_trymatchmaking(message, args, flags, guild, member) {
     where: {expired: false}
   });
 
-  // Print leaderboards
+  // Attempt to matchmake in all queues
   for (let i = 0; i < queue_rows.length; i++) {
-    matchmake(queue_rows[i].name);
+    await matchmake(queue_rows[i].name);
+    await sleep(2000);
+  }
+}
+
+async function case_changelogs(message, args, flags, guild, member) {
+  // Get changelog file and split into lines
+  const data = fs.readFileSync(config.changelogs_file);
+  const lines = data.split(/\r?\n/);
+
+  // Iterate through lines
+  let cl_block = -1;
+  let cl_lines = [[], [], [], []];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    switch (cl_block) {
+      case -1:
+        if (line.startsWith(`## [${args[0]}]`)) cl_block++;
+        break;
+
+      case 0: case 1: case 2: case 3:
+        cl_lines[cl_block].push(line);
+        if (line.startsWith(`##`)) cl_block++;
+        break;
+
+      default:
+
+    }
+  }
+
+  // If no matching version found
+  if (cl_block === -1) {
+    return message.channel.send('Patch notes not found.');
+  }
+
+  // Get relevant channels
+  const changelog_channel = client.channels.cache.get(config.changelog_channel);
+  const admin_channel = client.channels.cache.get(config.admin_channel);
+
+  // Print patch notes
+  changelog_channel.send(`**Version ${args[0]} Patch Notes**`);
+  changelog_channel.send('New Features:');
+  while (cl_lines[0].length > 0) {
+    const string_builder_segment = cl_lines[0].splice(0, 20);
+    string_builder_segment.unshift('```');
+    string_builder_segment.push('```');
+    await changelog_channel.send(string_builder_segment.join('\n'));
+  }
+  changelog_channel.send('Changes:');
+  while (cl_lines[1].length > 0) {
+    const string_builder_segment = cl_lines[1].splice(0, 20);
+    string_builder_segment.unshift('```');
+    string_builder_segment.push('```');
+    await changelog_channel.send(string_builder_segment.join('\n'));
+  }
+  changelog_channel.send('Bugfixes:');
+  while (cl_lines[2].length > 0) {
+    const string_builder_segment = cl_lines[2].splice(0, 20);
+    string_builder_segment.unshift('```');
+    string_builder_segment.push('```');
+    await changelog_channel.send(string_builder_segment.join('\n'));
+  }
+  admin_channel.send(`**Version ${args[0]} Admin Notes**`);
+  while (cl_lines[3].length > 0) {
+    const string_builder_segment = cl_lines[3].splice(0, 20);
+    string_builder_segment.unshift('```');
+    string_builder_segment.push('```');
+    await admin_channel.send(string_builder_segment.join('\n'));
   }
 }
 
@@ -960,7 +1306,6 @@ async function confirm_match_result(channel, match_id, result) {
   if (winner === user1.lowercase_name || winner === user2.lowercase_name) {
     const win1 = winner === user1.lowercase_name;
     match.update({
-      timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
       result: winner,
       rating_change1: gain1[win1 ? 0 : 2],
       rating_change2: gain2[win1 ? 2 : 0]
@@ -983,11 +1328,10 @@ async function confirm_match_result(channel, match_id, result) {
       `${client.users.cache.get(user1.discord_id)} ` +
       `${client.users.cache.get(user2.discord_id)} ` +
       `Result for Match ${match_id} (${match.queue.name}) ` +
-      `recorded as a win for ${result}.`);
+      `recorded as a win for ${result}. (${gain1[win1 ? 0 : 2]}|${gain2[win1 ? 2 : 0]})`);
   // If result is a draw
   } else if (winner === 'draw' || winner === 'tie' || winner === 'stalemate') {
     match.update({
-      timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
       result: 'DRAW',
       rating_change1: gain1[1],
       rating_change2: gain2[1]
@@ -1008,7 +1352,7 @@ async function confirm_match_result(channel, match_id, result) {
       `${client.users.cache.get(user1.discord_id)} ` +
       `${client.users.cache.get(user2.discord_id)} ` +
       `Result for Match ${match_id} (${match.queue.name}) ` +
-      `recorded as a draw.`);
+      `recorded as a draw. (${gain1[1]}|${gain2[1]})`);
   // Otherwise, there's a problem
   } else {
     console.log('ERROR: Match result unexpected after confirmation step')
@@ -1103,11 +1447,14 @@ async function print_leaderboard(channel, queue_id, persistent) {
     const string_builder_segment = string_builder.splice(0, 40);
     string_builder_segment.unshift('```diff');
     string_builder_segment.push('```');
-    channel.send(string_builder_segment.join('\n'));
+    await channel.send(string_builder_segment.join('\n'));
   }
 }
 
 async function leaderboards_print_loop(timer) {
+  // Note start time
+  const start_time = new Date().getTime();
+
   // Get channel and clear messages
   const channel = client.channels.cache.get(config.leaderboards_channel);
   channel.messages.fetch().then(async (msgs) => {
@@ -1115,7 +1462,10 @@ async function leaderboards_print_loop(timer) {
 
     // Get all active queues
     const queue_rows = await db.queues.findAll({
-      where: {expired: false}
+      where: {expired: false},
+      order: [
+        ['id', 'ASC']
+      ]
     });
 
     // Print leaderboards
@@ -1123,11 +1473,15 @@ async function leaderboards_print_loop(timer) {
       channel.send('\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-');
       channel.send(`__**${queue_rows[i].name}**__`);
       await print_leaderboard(channel, queue_rows[i].id, true);
+      await sleep(2000);
     }
   });
 
+  // Calculate elapsed time
+  const elapsed_time = new Date().getTime() - start_time;
+
   // Loop on timer
-  setTimeout(leaderboards_print_loop, timer, timer);
+  setTimeout(leaderboards_print_loop, timer - elapsed_time, timer);
 }
 
 // Function for determining top of ladder
@@ -1174,6 +1528,11 @@ async function update_best_player(queue_id) {
     }
   }
 
+  // TEMP
+  console.log(top_player_id);
+  console.log(top_player_rating);
+  console.log(top_player_total_games);
+
   // Check current owner of top player role
   const role_members = guild.roles.cache.get(
       top_player_rows[0].queues[0].realtime_reward_role).members;
@@ -1185,6 +1544,7 @@ async function update_best_player(queue_id) {
           `changed to ${top_player_member.user.username}`);
   // Else
   } else {
+    console.log(role_members[0]); // TEMP
     role_members.forEach(async (role_member, id) => {
       const player_row = await db.users.findOne({
         where: {discord_id: id},
@@ -1203,6 +1563,7 @@ async function update_best_player(queue_id) {
         return;
       }
 
+      console.log(player_row.amq_name); // TEMP
       // If not tied with the current top player, replace title
       // Note that there is NOT a redundancy check here since we use OR and strictly LT
       if (player_row.queues[0].user_ratings.rating < top_player_rating ||
@@ -1361,6 +1722,34 @@ client.on('message', async (message) => {
       case_pending(message, args, flags, guild, member);
       break;
 
+    // Views most recent matches
+    case 'matchhistory': case 'history': case 'hist': case 'mh':
+      if (args.length > 2)
+        return message.channel.send(err.number_of_arguments);
+
+      case_matchhistory(message, args, flags, guild, member);
+      break;
+
+    // Prints a list of the twenty oldest matches
+    case 'oldestmatches': case 'oldest': case 'old':
+    if (message.guild === undefined)
+        return message.channel.send(err.dm_disallowed);
+      if (!member.roles.cache.has(config.admin_role))
+        return message.channel.send(err.insufficient_privilege);
+    if (args.length !== 0)
+        return message.channel.send(err.number_of_arguments);
+
+      case_oldestmatches(message, args, flags, guild, member);
+      break;
+
+    // Toggles autoqueue status for a specific queue
+    case 'autoqueue': case 'aq':
+    if (args.length !== 1)
+        return message.channel.send(err.number_of_arguments);
+
+      case_autoqueue(message, args, flags, guild, member);
+      break;
+
     // Sets name for personal role
     case 'title': case 't':
       if (args.length !== 1)
@@ -1497,6 +1886,17 @@ client.on('message', async (message) => {
       case_trymatchmaking(message, args, flags, guild, member);
       break;
 
+    case 'changelogs': case 'changelog':
+      if (message.guild === undefined)
+        return message.channel.send(err.dm_disallowed);
+      if (!member.roles.cache.has(config.admin_role))
+        return message.channel.send(err.insufficient_privilege);
+      if (args.length !== 0)
+        return message.channel.send(err.number_of_arguments);
+
+      case_changelogs(message, args, flags, guild, member);
+      break;
+
     // SOS
     case 'help': case 'commands': case '?': case 'sos':
       case_help(message, args, flags, guild, member);
@@ -1511,8 +1911,13 @@ client.on('message', async (message) => {
 
 // Match creation function
 async function make_match(user1, elo1, user2, elo2) {
+  const rank1 = helper.what_elo(elo1);
+  const rank2 = helper.what_elo(elo2);
+
   db.matches.create({
     result: 'PENDING',
+    rank1: rank1,
+    rank2: rank2,
     timestamp: db.sequelize.literal('CURRENT_TIMESTAMP')
   }).then((match) => {
     match.setUser1(user1.user);
@@ -1524,17 +1929,17 @@ async function make_match(user1, elo1, user2, elo2) {
         `Match ID# \`${match.id.toString().padStart(6)}\` - ` +
         `Queue \`${user1.queue.name.padEnd(16)}\`:` +
         `${client.users.cache.get(user1.user.discord_id)} ` +
-        `${user1.user.amq_name} (${helper.what_elo(elo1)}) vs. ` +
+        `${user1.user.amq_name} (${rank1}) vs. ` +
         `${client.users.cache.get(user2.user.discord_id)} ` +
-        `${user2.user.amq_name} (${helper.what_elo(elo2)})`);
+        `${user2.user.amq_name} (${rank2})`);
 
     // Delete LFM rows for matchmade players
     user1.destroy();
     user2.destroy();
     console.log('Match creation successful');
 
-  }).catch((error) => {
-    console.error(error);
+  }).catch((e) => {
+    console.error(e);
     console.log('Error finalizing match creation');
   });
 }
@@ -1568,8 +1973,9 @@ async function matchmake(queue_name) {
         ['timestamp', 'ASC']
       ]
     });
-    if (!lfm_rows) {
+    if (!lfm_rows || !lfm_rows[0]) {
       console.log('No users found in queue');
+      return;
     }
     const time_elapsed = new Date() - new Date(lfm_rows[0].timestamp);
     let matchmakeable = false;
@@ -1732,13 +2138,64 @@ async function matchmake(queue_name) {
     const results = blossom(edges);
     for (let i = 0; i < results.length; i++) {
       if (i < results[i])
-        await make_match(lfm_rows[i], percentiles[i], lfm_rows[results[i]], percentiles[results[i]]);
+        await make_match(lfm_rows[i], percentiles[i],
+                        lfm_rows[results[i]], percentiles[results[i]]);
     }
+
+    // Requeue autoqueued users after 30s
+    setTimeout(requeue_autoqueue, 30000, queue_name);
+
   } finally {
     // Release lock
     matchmaker_locks[queue_name] = 0;
   }
 };
+
+// Finds all autoqueued users for specified queue, and requeues them
+async function requeue_autoqueue(queue_name) {
+  // Fetch all autoqueues for specified queue
+  db.autoqueues.findAll({
+    include: [{
+      model: db.users
+    }, {
+      model: db.queues,
+      where: {name: queue_name}
+    }]
+  }).then((rows) => {
+    rows.forEach((row) => {
+
+      // Check if already queued
+      const lfm_row = await db.lfm_users.findOne({
+        include: [{
+          model: db.users,
+          where: {
+            id: row.user.id
+          }
+        }, {
+          model: db.queues,
+          where: {
+            id: row.queue.id
+          }
+        }]
+      });
+
+      // If not, create entry
+      if (!lfm_row) {
+        db.lfm_users.create().then((lfm_user) => {
+          lfm_user.setUser(row.user);
+          lfm_user.setQueue(row.queue);
+        });
+      }
+      console.log(`${row.user.amq_name} autoqueued to ${row.queue.name}`);
+
+    });
+
+  }).catch((e) => {
+    console.log(e.name);
+    console.log(e.message);
+    console.log('Error requeueing autoqueues')
+  });
+}
 
 // Possible reaction cases
 // Reaction to join a queue
@@ -1772,7 +2229,7 @@ async function handle_queue_reaction(reaction, user) {
     }
   }
 
-  // Check that number of pending matches less than 3
+  // Check that number of pending matches less than 5
   const match_count = await db.matches.count({
     where: {
       [db.Sequelize.Op.or]: [
@@ -1812,7 +2269,7 @@ async function handle_queue_reaction(reaction, user) {
       where: {
         name: queue.name
       }
-    }],
+    }]
   });
   // If not, create queue entry
   if (lfm_row === null) {
@@ -1888,8 +2345,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
   if (reaction.partial) {
     try {
       await reaction.fetch();
-    } catch (error) {
-      console.log('Error fetching message: ', error);
+    } catch (e) {
+      console.log('Error fetching message: ', e);
       return;
     }
   }

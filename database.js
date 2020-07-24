@@ -13,17 +13,18 @@ if (env === 'dev') {
 const db = {};
 
 // Connect to database
-let sequelize;
-if (env === 'dev') {
-  sequelize = new Sequelize(process.env.DEV_DATABASE_URL, {
-    logging: false
-  });
-} else {
-  sequelize = new Sequelize(process.env.DATABASE_URL, {
-    logging: false
-  });
-}
-
+const sequelize_options = {
+    host: 'localhost',
+    dialect: 'sqlite',
+    logging: false,
+    dialectOptions: {
+      charset: 'utf8',
+      collate: 'utf8_general_ci',
+    }
+  };
+sequelize_options.storage = env === 'dev' ?
+    process.env.DEV_DATABASE_URL : process.env.DATABASE_URL;
+const sequelize = new Sequelize('database', 'user', 'password', sequelize_options);
 
 // Create models
 db.users = sequelize.define('users', {
@@ -108,6 +109,12 @@ db.matches = sequelize.define('matches', {
   rating_change2: {
     type: Sequelize.INTEGER,
   },
+  rank1: {
+    type: Sequelize.STRING,
+  },
+  rank2: {
+    type: Sequelize.STRING,
+  },
 }, {
   underscored: true,
 });
@@ -122,6 +129,11 @@ db.match_confirmations = sequelize.define('match_confirmations', {
   result: {
     type: Sequelize.STRING,
   },
+}, {
+  underscored: true,
+});
+
+db.autoqueues = sequelize.define('autoqueues', {
 }, {
   underscored: true,
 });
@@ -161,6 +173,8 @@ db.matches.belongsTo(db.users, {as: 'user1'});
 db.matches.belongsTo(db.users, {as: 'user2'});
 db.matches.belongsTo(db.queues);
 db.match_confirmations.belongsTo(db.matches);
+db.autoqueues.belongsTo(db.users);
+db.autoqueues.belongsTo(db.queues);
 db.users.belongsToMany(db.queues, {through: db.user_ratings});
 db.queues.belongsToMany(db.users, {through: db.user_ratings});
 

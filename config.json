@@ -2,7 +2,7 @@
   "prefix": "m!",
   "guild_id": "709487688536817805",
   "admin_role": "709488679902511124",
-  "tourny_role": "709640166977044520",
+  "tourney_role": "709640166977044520",
   "list_role": "711718480709419040",
   "list_mogul_id": "96433699918184448",
   "changelog_channel": "727234260028883037",
@@ -13,16 +13,18 @@
   "approvals_channel": "717429312248086528",
   "leaderboards_channel": "727787684604674078",
   "help_channel": "709507173473845318",
+  "leaderboards_print_interval": 3600000,
   "placement_games": 10,
   "stable_k": 30,
   "placement_k": 50,
   "max_matches": 10,
   "matchmaking_requirements": [
     2,
-    21600000,
+    43200000,
     12,
     1200000,
     20,
     0
-  ]
+  ],
+  "changelogs_file": "CHANGELOG.md"
 }
