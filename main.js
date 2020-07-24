@@ -1481,7 +1481,7 @@ async function leaderboards_print_loop(timer) {
   const elapsed_time = new Date().getTime() - start_time;
 
   // Loop on timer
-  setTimeout(leaderboards_print_loop, timer - elapsed_time, timer);
+  setTimeout(leaderboards_print_loop, 3600000 - elapsed_time, 3600000);
 }
 
 // Function for determining top of ladder
