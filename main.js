@@ -39,7 +39,7 @@ client.once('ready', () => {
   // Start printing leaderboards
   const ttn_hour = new Date().setMinutes(60) - new Date().getTime();
   console.log(`Printing first leaderboards in ${ttn_hour}`);
-  leaderboards_print_loop(ttn_hour);
+  setTimeout(leaderboards_print_loop, ttn_hour, config.leaderboards_print_interval);
 });
 
 // Following are case-functions for bot-commands in main loop
@@ -916,7 +916,7 @@ async function case_oldestmatches(message, args, flags, guild, member) {
 async function case_autoqueue(message, args, flags, guild, member) {
   try {
     // Fetch user
-    await user_row = db.users.findOne({
+    const user_row = await db.users.findOne({
       where: {discord_id: message.author.id}
     });
     if (!user_row) {
@@ -925,7 +925,7 @@ async function case_autoqueue(message, args, flags, guild, member) {
     }
 
     // Fetch queue
-    await queue_row = db.queues.findOne({
+    const queue_row = await db.queues.findOne({
       where: {lowercase_name: args[0].toLowerCase()}
     });
     if (!queue_row) {
@@ -933,7 +933,7 @@ async function case_autoqueue(message, args, flags, guild, member) {
     }
 
     // Check if autoqueue entry already exists
-    const aq_row = db.autoqueues.findOne({
+    const aq_row = await db.autoqueues.findOne({
       include: [{
         model: db.users,
         where: {
@@ -1481,7 +1481,7 @@ async function leaderboards_print_loop(timer) {
   const elapsed_time = new Date().getTime() - start_time;
 
   // Loop on timer
-  setTimeout(leaderboards_print_loop, 3600000 - elapsed_time, 3600000);
+  setTimeout(leaderboards_print_loop, timer - elapsed_time, timer);
 }
 
 // Function for determining top of ladder
