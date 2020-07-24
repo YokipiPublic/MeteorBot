@@ -623,7 +623,7 @@ async function case_headtohead(message, args, flags, guild, member) {
   string_builder.push(
       (total_elo_gl >= 0 ? `"+${total_elo_gl}"` : `'${total_elo_gl}'`).padStart(23) + ' ' +
       (total_wins + '-' + total_draws + '-' + total_losses).padStart(11) + ' ' +
-      overall_winrate.padStart(3) + '%';
+      overall_winrate.padStart(3) + '%');
   string_builder.push('----------------------------------------') // 40
   string_builder.push('Queue           |  W|  D|  L|  A|Elo +/-');
   for (let i = 0; i < queue_data.length; i++) {
