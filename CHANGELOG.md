@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 -Elo gain/loss is now displayed upon match reporting.
 -!autoqueue (!aq) added. Use "!autoqueue <Queue Name>" to toggle.
 -!matchhistory (!mh/!history/!hist) added. You can view all of your completed matches.
--New leaderboard for top 20 total games played. "!leaderboard "total games"" to view it.
+-New leaderboard for top 25 total games played. "!leaderboard "total games"" to view it.
 -!headtohead now displays the total record, overall winrate, and elo gained/lost.
 -!profile now includes total record, overall winrate, and average elo.
 ### Changed

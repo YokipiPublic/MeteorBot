@@ -421,12 +421,12 @@ async function case_leaderboard(message, args, flags, guild, member) {
     let user_names = [];
     let user_games = [];
     for (let i = 0; i < user_rows.length; i++) {
-      user_names[i] = user_rows.amq_name;
+      user_names[i] = user_rows[i].amq_name;
       user_games[i] = 0;
-      for (let j = 0; j < user_rows.queues.length; j++) {
-        user_games[i] += user_rows.queues[j].wins +
-                          user_rows.queues[j].draws +
-                          user_rows.queues[j].losses;
+      for (let j = 0; j < user_rows[i].queues.length; j++) {
+        user_games[i] += user_rows[i].queues[j].user_ratings.wins +
+                          user_rows[i].queues[j].user_ratings.draws +
+                          user_rows[i].queues[j].user_ratings.losses;
       }
     }
 
@@ -434,20 +434,20 @@ async function case_leaderboard(message, args, flags, guild, member) {
     user_names = user_names.slice().sort((a, b) => {
       return user_games[user_names.indexOf(b)] - user_games[user_names.indexOf(a)];
     });
-    user_games = user_games.sort((a, b) => {
+    user_games = user_games.slice().sort((a, b) => {
       return b - a;
     });
 
-    // Print top 20 players
+    // Print top 40 players
     const string_builder = [];
     string_builder.push('```diff');
     string_builder.push('- Total Games');
     string_builder.push('Name                    |Games')
-    for (let i = 0; i < 20; i++) {
-      string_builder.push(user_names[ui].padEnd(25) + user_games.padStart(5));
+    for (let i = 0; i < 40; i++) {
+      string_builder.push(user_names[i].padEnd(25) + user_games[i].toString().padStart(5));
     }
     string_builder.push('```');
-    return message.channel.send(string_builder_segment.join('\n'));
+    return message.channel.send(string_builder.join('\n'));
   }
 
   // Check that queue exists
@@ -500,22 +500,22 @@ async function case_profile(message, args, flags, guild, member) {
   let average_elo = 0;
   for (let i = 0; i < ratings_rows.length; i++) {
     average_elo += ratings_rows[i].users[0].user_ratings.rating;
-    total_wins = ratings_rows[i].users[0].user_ratings.wins;
-    total_draws = ratings_rows[i].users[0].user_ratings.draws;
-    total_losses = ratings_rows[i].users[0].user_ratings.losses;
+    total_wins += ratings_rows[i].users[0].user_ratings.wins;
+    total_draws += ratings_rows[i].users[0].user_ratings.draws;
+    total_losses += ratings_rows[i].users[0].user_ratings.losses;
   }
   average_elo /= ratings_rows.length;
   average_elo = Math.round(average_elo);
-  let overall_winrate = total_wins + 0.5*total_draws /
+  let overall_winrate = (total_wins + 0.5*total_draws) /
       (total_wins + total_draws + total_losses);
-  overall_winrate = Math.round(100 * overall_winrate);
+  overall_winrate = isNaN(overall_winrate) ? 0 : Math.round(100 * overall_winrate);
 
   // Build string and print
   const string_builder = [];
   string_builder.push(ratings_rows[0].users[0].amq_name.padEnd(20) + ' ' + 
-      average_elo.padStart(4) + ' ' +
+      average_elo.toString().padStart(4) + ' ' +
       (total_wins + '-' + total_draws + '-' + total_losses).padStart(11) + ' ' +
-      overall_winrate.padStart(3) + '%');
+      overall_winrate.toString().padStart(3) + '%');
   string_builder.push('------------------------------------------'); // 42
   string_builder.push('Queue           |Elo |Peak|  W|  D|  L|  A');
   for (let i = 0; i < ratings_rows.length; i++) {
@@ -561,7 +561,7 @@ async function case_headtohead(message, args, flags, guild, member) {
   for (let i = 0; i < queue_rows.length; i++) {
     queue_data[i] = {};
     queue_data[i].name = queue_rows[i].name;
-    const match_rows = await db.matches.count({
+    const match_rows = await db.matches.findAll({
       where: {
         result: {[db.Sequelize.Op.ne]: 'PENDING'},
         [db.Sequelize.Op.or]: [
@@ -601,9 +601,11 @@ async function case_headtohead(message, args, flags, guild, member) {
       else if (match_rows[j].result === 'ABORT') queue_data[i].aborts++;
       else console.log('ERROR: Unexpected match result detected while checking hth');
 
-      queue_data[i].elo_gl += 
-          match_rows[j].user1.lowercase_name === args[0].toLowerCase() ?
-          match_rows[j].rating_change1 : match_rows[j].rating_change2;
+      if (match_rows[j].result !== 'ABORT') {
+        queue_data[i].elo_gl += 
+            match_rows[j].user1.lowercase_name === args[0].toLowerCase() ?
+            match_rows[j].rating_change1 : match_rows[j].rating_change2;
+      }
     }
 
     total_wins += queue_data[i].wins;
@@ -613,17 +615,17 @@ async function case_headtohead(message, args, flags, guild, member) {
   }
 
   // Calculate overall winrate
-  let overall_winrate = total_wins + 0.5*total_draws /
+  let overall_winrate = (total_wins + 0.5*total_draws) /
       (total_wins + total_draws + total_losses);
-  overall_winrate = Math.round(100 * overall_winrate);
+  overall_winrate = isNaN(overall_winrate) ? 0 : Math.round(100 * overall_winrate);
 
   // Build string and print
   const string_builder = [];
   string_builder.push(`${args[0]}'s record against ${args[1]}`);
   string_builder.push(
-      (total_elo_gl >= 0 ? `"+${total_elo_gl}"` : `'${total_elo_gl}'`).padStart(23) + ' ' +
+      ((total_elo_gl >= 0 ? '+' : '') + total_elo_gl).padStart(23) + ' ' +
       (total_wins + '-' + total_draws + '-' + total_losses).padStart(11) + ' ' +
-      overall_winrate.padStart(3) + '%');
+      overall_winrate.toString().padStart(3) + '%');
   string_builder.push('----------------------------------------') // 40
   string_builder.push('Queue           |  W|  D|  L|  A|Elo +/-');
   for (let i = 0; i < queue_data.length; i++) {
@@ -634,13 +636,13 @@ async function case_headtohead(message, args, flags, guild, member) {
           queue_data[i].wins.toString().padStart(3) + ' ' +
           queue_data[i].draws.toString().padStart(3) + ' ' +
           queue_data[i].losses.toString().padStart(3) + ' ' +
-          queue_data[i].aborts.toString().padStart(3)) + ' ' +
-          (queue_data[i].elo_gl >= 0 ? `"+${queue_data[i].elo_gl}"` :
-              `'${queue_data[i].elo_gl}'`).padStart(7);
+          queue_data[i].aborts.toString().padStart(3) + ' ' +
+          ((queue_data[i].elo_gl >= 0 ? '+' : '') +
+          queue_data[i].elo_gl).padStart(7));
   }
   while (string_builder.length > 0) {
     const string_builder_segment = string_builder.splice(0, 40);
-    string_builder_segment.unshift('```ml');
+    string_builder_segment.unshift('```');
     string_builder_segment.push('```');
     await channel.send(string_builder_segment.join('\n'));
   }
@@ -776,9 +778,9 @@ async function case_matchhistory(message, args, flags, guild, member) {
   const channel = flags.includes('dm') ? message.author : message.channel;
 
   // Check if searching by author ID or amq_name
-  const search_by_author = !(args.length > 0 && !Number.isInteger(args[0]));
-  const page = args.length > 0 && Number.isInteger(args[args.length-1]) ?
-      args[args.length-1] : 1;
+  const search_by_author = !(args.length > 0 && isNaN(args[0]));
+  const page = (args.length > 0 && !isNaN(args[args.length-1])) ?
+      parseInt(args[args.length-1]) : 1;
 
   // Fetch all user and non-pending matches for user
   let user_row;
@@ -805,8 +807,8 @@ async function case_matchhistory(message, args, flags, guild, member) {
       order: [
         ['updated_at', 'DESC']
       ],
-      limit: 40,
-      offset: 40*(page-1)
+      limit: 25,
+      offset: 25*(page-1)
     });
   } else {
     user_row = await db.users.findOne({where: {lowercase_name: args[0].toLowerCase()}});
@@ -830,13 +832,13 @@ async function case_matchhistory(message, args, flags, guild, member) {
       order: [
         ['updated_at', 'DESC']
       ],
-      limit: 40,
-      offset: 40*(page-1)
+      limit: 25,
+      offset: 25*(page-1)
     });
   }
 
   // If user has no completed matches in range
-  if (match_rows.length < 1) {
+  if (match_rows.length < 1 || page <= 0) {
     return channel.send('No results found.');
   }
 
@@ -858,13 +860,13 @@ async function case_matchhistory(message, args, flags, guild, member) {
     let match_string = `ID# ${match_rows[i].id.toString().padStart(6)} - ` +
         `${match_rows[i].queue.name.padEnd(16)}: vs. ` + 
         `${match_opponent.padEnd(20)} ${match_result.padEnd(6)} ` +
-        (match_elo_change >= 0 ? `"+${match_elo_change}"` : `'${match_elo_change}'`);
+        ((match_elo_change >= 0 ? '+' : '') + match_elo_change.toString()).padStart(3);
     string_builder.push(match_string);
   }
-  channel.send(`Page ${page} of ${user_row.amq_name}'s:`);
-  string_builder.unshift('```ml');
+  channel.send(`Page ${page} of ${user_row.amq_name}'s results:`);
+  string_builder.unshift('```');
   string_builder.push('```');
-  channel.send(string_builder_segment.join('\n'));
+  channel.send(string_builder.join('\n'));
 }
 
 async function case_oldestmatches(message, args, flags, guild, member) {
@@ -1180,21 +1182,21 @@ async function case_trymatchmaking(message, args, flags, guild, member) {
 async function case_changelogs(message, args, flags, guild, member) {
   // Get changelog file and split into lines
   const data = fs.readFileSync(config.changelogs_file);
-  const lines = data.split(/\r?\n/);
+  const lines = data.toString().split(/\r?\n/);
 
   // Iterate through lines
-  let cl_block = -1;
+  let cl_block = -2;
   let cl_lines = [[], [], [], []];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     switch (cl_block) {
-      case -1:
+      case -2:
         if (line.startsWith(`## [${args[0]}]`)) cl_block++;
         break;
 
-      case 0: case 1: case 2: case 3:
-        cl_lines[cl_block].push(line);
+      case -1: case 0: case 1: case 2: case 3:
         if (line.startsWith(`##`)) cl_block++;
+        else cl_lines[cl_block].push(line);
         break;
 
       default:
@@ -1213,24 +1215,24 @@ async function case_changelogs(message, args, flags, guild, member) {
 
   // Print patch notes
   changelog_channel.send(`**Version ${args[0]} Patch Notes**`);
-  changelog_channel.send('New Features:');
   while (cl_lines[0].length > 0) {
     const string_builder_segment = cl_lines[0].splice(0, 20);
     string_builder_segment.unshift('```');
+    string_builder_segment.unshift('New Features:');
     string_builder_segment.push('```');
     await changelog_channel.send(string_builder_segment.join('\n'));
   }
-  changelog_channel.send('Changes:');
   while (cl_lines[1].length > 0) {
     const string_builder_segment = cl_lines[1].splice(0, 20);
     string_builder_segment.unshift('```');
+    string_builder_segment.unshift('Changes:');
     string_builder_segment.push('```');
     await changelog_channel.send(string_builder_segment.join('\n'));
   }
-  changelog_channel.send('Bugfixes:');
   while (cl_lines[2].length > 0) {
     const string_builder_segment = cl_lines[2].splice(0, 20);
     string_builder_segment.unshift('```');
+    string_builder_segment.unshift('Bugfixes:');
     string_builder_segment.push('```');
     await changelog_channel.send(string_builder_segment.join('\n'));
   }
@@ -1891,7 +1893,7 @@ client.on('message', async (message) => {
         return message.channel.send(err.dm_disallowed);
       if (!member.roles.cache.has(config.admin_role))
         return message.channel.send(err.insufficient_privilege);
-      if (args.length !== 0)
+      if (args.length !== 1)
         return message.channel.send(err.number_of_arguments);
 
       case_changelogs(message, args, flags, guild, member);
