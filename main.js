@@ -2183,13 +2183,14 @@ async function requeue_autoqueue(queue_name) {
 
       // If not, create entry
       if (!lfm_row) {
-        db.lfm_users.create().then((lfm_user) => {
+        db.lfm_users.create({
+          timestamp: db.sequelize.literal('CURRENT_TIMESTAMP')
+        }).then((lfm_user) => {
           lfm_user.setUser(row.user);
           lfm_user.setQueue(row.queue);
         });
+        console.log(`${row.user.amq_name} autoqueued to ${row.queue.name}`);
       }
-      console.log(`${row.user.amq_name} autoqueued to ${row.queue.name}`);
-
     });
 
   }).catch((e) => {
