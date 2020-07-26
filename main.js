@@ -2185,8 +2185,8 @@ async function requeue_autoqueue(queue_name) {
       const match_count = await db.matches.count({
         where: {
           [db.Sequelize.Op.or]: [
-            {'$user1.discord_id$': user.id},
-            {'$user2.discord_id$': user.id}
+            {'$user1.id$': row.user.id},
+            {'$user2.id$': row.user.id}
           ],
           result: 'PENDING'
         },
@@ -2199,7 +2199,7 @@ async function requeue_autoqueue(queue_name) {
         }, {
           model: db.queues,
           where: {
-            name: queue.name
+            id: row.queue.id
           }
         }]
       });
