@@ -2181,6 +2181,32 @@ async function requeue_autoqueue(queue_name) {
         }]
       });
 
+      // Check that number of pending matches less than 5
+      const match_count = await db.matches.count({
+        where: {
+          [db.Sequelize.Op.or]: [
+            {'$user1.discord_id$': user.id},
+            {'$user2.discord_id$': user.id}
+          ],
+          result: 'PENDING'
+        },
+        include: [{
+          model: db.users,
+          as: 'user1'
+        }, {
+          model: db.users,
+          as: 'user2'
+        }, {
+          model: db.queues,
+          where: {
+            name: queue.name
+          }
+        }]
+      });
+      if (match_count >= 5) {
+        return;
+      }
+
       // If not, create entry
       if (!lfm_row) {
         db.lfm_users.create({
