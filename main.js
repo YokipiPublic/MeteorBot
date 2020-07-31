@@ -233,7 +233,7 @@ async function case_signup(message, args, flags, guild, member) {
   // Calculate average elo
   let average_elo = 0;
   const ratings_rows = await db.queues.findAll({
-    where: {expired: false},
+    where: {expired: 0},
     include: [{
       model: db.users,
       where: {discord_id: message.author.id},
@@ -473,7 +473,7 @@ async function case_profile(message, args, flags, guild, member) {
   if (args.length === 0) ratings_rows_users_where.discord_id = message.author.id;
   else ratings_rows_users_where.lowercase_name = args[0].toLowerCase();
   // If not 'full', ignore expired queues
-  if (!full) ratings_rows_where.expired = false;
+  if (!full) ratings_rows_where.expired = 0;
   const ratings_rows = await db.queues.findAll({
     where: ratings_rows_where,
     include: [{
@@ -544,7 +544,7 @@ async function case_headtohead(message, args, flags, guild, member) {
 
   // Get all desired queues
   const queue_rows_where = {};
-  if (!full) queue_rows_where.expired = false;
+  if (!full) queue_rows_where.expired = 0;
   const queue_rows = await db.queues.findAll({
     where: queue_rows_where,
     order: [
@@ -934,6 +934,23 @@ async function case_autoqueue(message, args, flags, guild, member) {
       return message.channel.send('Requested queue does not exist.');
     }
 
+    // Verify that user has necessary role
+    if (queue_row.required_role !== null) {
+      if (!member.roles.cache.has(queue_row.required_role)) {
+        message.channel.send('Your list must be approved first before ' +
+            'playing in this queue.')
+          .catch((e) => {
+            console.log('Failed to send direct message.');
+          });
+        message.channel.send('Please request approval with `m!registerlist <List URL>` ' +
+            'if you have not already done so.')
+          .catch((e) => {
+            console.log('Failed to send direct message.');
+          });
+        return;
+      }
+    }
+
     // Check if autoqueue entry already exists
     const aq_row = await db.autoqueues.findOne({
       include: [{
@@ -973,7 +990,7 @@ async function case_title(message, args, flags, guild, member) {
   // Fetch all active personal reward roles
   const queue_rows = await db.queues.findAll({
     attributes: ['custom_reward_role'],
-    where: {expired: false}
+    where: {expired: 0}
   });
 
   // Change role name when found
@@ -993,8 +1010,8 @@ async function case_title(message, args, flags, guild, member) {
 async function case_updaterewards(message, args, flags, guild, member) {
   // Fetch all active reward roles
   const queue_rows = await db.queues.findAll({
-    attributes: ['realtime_reward_role', 'custom_reward_role'],
-    where: {expired: false}
+    attributes: ['name', 'realtime_reward_role', 'custom_reward_role'],
+    where: {expired: 0}
   });
 
   // Remove personal roles from everyone
@@ -1018,6 +1035,7 @@ async function case_updaterewards(message, args, flags, guild, member) {
         winners_set.push(id);
       }
     });
+    console.log(queue_rows[i].name);
     console.log(winners_set);
   }
   console.log('Personal roles awarded');
@@ -1169,7 +1187,7 @@ async function case_printlastmatchmake(message, args, flags, guild, member) {
 async function case_trymatchmaking(message, args, flags, guild, member) {
   // Get all active queues
   const queue_rows = await db.queues.findAll({
-    where: {expired: false}
+    where: {expired: 0}
   });
 
   // Attempt to matchmake in all queues
@@ -1464,7 +1482,7 @@ async function leaderboards_print_loop(timer) {
 
     // Get all active queues
     const queue_rows = await db.queues.findAll({
-      where: {expired: false},
+      where: {expired: 0},
       order: [
         ['id', 'ASC']
       ]
@@ -1987,6 +2005,9 @@ async function matchmake(queue_name) {
         matchmakeable = true;
         break;
       }
+    }
+    if (lfm_rows[0].queue.expired) {
+      matchmakeable = false;
     }
     if (!matchmakeable) {
       console.log('Matchmaking conditions not met');
