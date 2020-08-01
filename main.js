@@ -990,7 +990,6 @@ async function case_title(message, args, flags, guild, member) {
   // Fetch all active personal reward roles
   const queue_rows = await db.queues.findAll({
     attributes: ['custom_reward_role'],
-    where: {expired: 0}
   });
 
   // Change role name when found
@@ -1035,9 +1034,15 @@ async function case_updaterewards(message, args, flags, guild, member) {
         winners_set.push(id);
       }
     });
-    console.log(queue_rows[i].name);
-    console.log(winners_set);
   }
+  for (let i = 0; i < winners_set.length; i++) {
+    client.users.cache.get(winners_set[i]).send('You have been awarded a personal, ' +
+        'customizable role for your outstanding performance in a queue this season. ' +
+        'Please reply with `m!title <Role Name>` to change the name of your role.')
+      .catch((e) => {
+        console.log('Failed to send direct message.');
+      });
+  } 
   console.log('Personal roles awarded');
   message.channel.send('Finished updating personal roles.');
 }
@@ -2044,7 +2049,10 @@ async function matchmake(queue_name) {
       client.users.cache.get(lfm_rows[lfm_num].user.discord_id).send(
           'There were an odd number of players in the queue during this round ' +
           'of matchmaking, and we were unable to find you a match. You are still in the ' +
-          'queue and will be matched with an opponent soon.');
+          'queue and will be matched with an opponent soon.')
+        .catch((e) => {
+          console.log('Failed to send direct message.');
+        });;
     }
 
     // Get percentiles of all users to matchmake

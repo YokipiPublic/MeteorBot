@@ -4,7 +4,7 @@ const err = {};
 
 err.dm_disallowed = 'This command cannot be completed by DM.';
 err.insufficient_privilege = 'You do not have the necessary privilege for this command.';
-err.number_of_arguments = 'An unexpected number of arguments was given.';
+err.number_of_arguments = 'An unexpected number of arguments was given. You may be missing quotation marks.';
 err.default_messages = [
     'Meteor-chan isn\'t that kind of bot! (⋟﹏⋞)',
     'B-baka!!!',
