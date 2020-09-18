@@ -1390,6 +1390,7 @@ async function confirm_match_result(channel, match_id, result) {
 async function print_leaderboard(channel, queue_id, persistent) {
   // Fetch all users of queue, sorted by rating
   const rating_rows = await db.users.findAll({
+    where: {banned: 0},
     include: [{
       model: db.queues,
       where: {id: queue_id},
@@ -2028,6 +2029,7 @@ async function matchmake(queue_name) {
 
     // Get all users of queue, ordered by rating
     const rating_rows = await db.users.findAll({
+      where: {banned: 0},
       include: [{
         model: db.queues,
         where: {name: queue_name},

@@ -40,6 +40,10 @@ db.users = sequelize.define('users', {
     type: Sequelize.STRING,
     unique: true,
   },
+  banned: {
+    type: Sequelize.BOOLEAN,
+    defaultValue: '0',
+  },
 }, {
   underscored: true,
 });
