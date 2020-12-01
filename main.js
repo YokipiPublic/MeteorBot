@@ -3,7 +3,9 @@
 const Discord = require('discord.js');
 const db = require('./database.js');
 const err = require('./error_messages.js');
+const dbc = require('./database_commands.js');
 const helper = require('./helper.js');
+const lists = require('./lists.js');
 const fs = require('fs');
 const blossom = require('edmonds-blossom');
 
@@ -40,6 +42,9 @@ client.once('ready', () => {
   const ttn_hour = new Date().setMinutes(60) - new Date().getTime();
   console.log(`Printing first leaderboards in ${ttn_hour}`);
   setTimeout(leaderboards_print_loop, ttn_hour, config.leaderboards_print_interval);
+
+  // Start periodic matchmaking attempts
+  try_matchmaking_loop();
 });
 
 // Following are case-functions for bot-commands in main loop
@@ -165,8 +170,14 @@ async function case_rejectlist(message, args, flags, guild, member) {
   }
 
   // Send message to requester
-  const listuser = client.users.cache.get(user.discord_id);
-  if (listuser === undefined) message.channel.send("Could not find user from ID.");
+  guild.members.fetch(user.discord_id)
+    .then(console.log)
+    .catch(console.error);
+  const listuser = await guild.members.fetch(user.discord_id);
+  if (listuser === undefined) {
+    message.channel.send("Could not find user from ID.");
+    return;
+  }
   listuser.send('Your list did not meet the standards of the server ' +
       'and thereby has been rejected.');
   if (args.length === 2) listuser.send(`Included message: ${args[1]}`);
@@ -188,8 +199,11 @@ async function case_acceptlist(message, args, flags, guild, member) {
   }
 
   // Send message to requester
-  const listuser = guild.members.cache.get(user.discord_id);
-  if (listuser === undefined) message.channel.send("Could not find user from ID.");
+  const listuser = await guild.members.fetch(user.discord_id);
+  if (listuser === undefined) {
+    message.channel.send("Could not find user from ID.");
+    return;
+  }
   listuser.send('Your list has been approved. Congratulations.');
   if (args.length === 2) listuser.send(`Included message: ${args[1]}`);
   listuser.roles.add(config.list_role);
@@ -915,6 +929,117 @@ async function case_oldestmatches(message, args, flags, guild, member) {
   message.channel.send(string_builder.join('\n'));
 }
 
+// Suppresses messages if no_unqueue is true
+async function enqueue(reply_target, discord_id, queue_name, no_unqueue) {
+  try {
+    // Fetch user
+    const user_row = await db.users.findOne({
+      where: {discord_id: discord_id}
+    });
+    if (!user_row) {
+      if (!no_unqueue)
+        reply(reply_target, 'You must register first. Please reply with `m!register <AMQ Username>` in order to register.');
+      return;
+    }
+
+    // Fetch queue
+    const queue_row = await db.queues.findOne({
+      where: {lowercase_name: queue_name.toLowerCase()}
+    });
+    if (!queue_row) {
+      if (!no_unqueue)
+        reply(reply_target, 'Requested queue does not exist.');
+      return;
+    }
+
+    // Force update member
+    const guild = await client.guilds.cache.get(config.guild_id);
+    const member = await guild.members.fetch(discord_id);
+
+    // Verify that user has necessary role
+    if (queue_row.required_role !== null) {
+      if (!member.roles.cache.has(queue_row.required_role)) {
+        if (!no_unqueue) {
+          reply(reply_target, 'Your list must be approved first before playing in this queue.');
+          reply(reply_target, 'Please request approval with `m!registerlist <List URL>` if you have not already done so.');
+        }
+        return;
+      }
+    }
+
+    // Check that number of pending matches less than 5
+    const match_count = await db.matches.count({
+      where: {
+        [db.Sequelize.Op.or]: [
+          {'$user1.id$': user_row.id},
+          {'$user2.id$': user_row.id}
+        ],
+        result: 'PENDING'
+      },
+      include: [{
+        model: db.users,
+        as: 'user1'
+      }, {
+        model: db.users,
+        as: 'user2'
+      }, {
+        model: db.queues,
+        where: {
+          id: queue_row.id
+        }
+      }]
+    });
+    if (match_count >= 5) {
+      if (!no_unqueue)
+        reply(reply_target, 'You already have 5 matches to play in this queue.');
+      return;
+    }
+
+    // Check if already queued
+    const lfm_row = await db.lfm_users.findOne({
+      include: [{
+        model: db.users,
+        where: {
+          id: user_row.id
+        }
+      }, {
+        model: db.queues,
+        where: {
+          id: queue_row.id
+        }
+      }]
+    });
+
+    // If not, create queue entry
+    if (lfm_row === null) {
+      db.lfm_users.create({
+        timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
+      }).then((lfm_user) => {
+        lfm_user.setUser(user_row);
+        lfm_user.setQueue(queue_row);
+      });
+      console.log (`${user_row.amq_name} queued to ${queue_row.name}`);
+      if (!no_unqueue)
+        reply(reply_target, `You have been queued to ${queue_row.name}.`);
+      setTimeout(matchmake, 10000, queue_row.name);
+
+    // Otherwise, if no_unqueue is false, unqueue
+    } else if (!no_unqueue) {
+      lfm_row.destroy();
+      console.log (`${user_row.amq_name} unqueued from ${queue_row.name}`);
+      reply(reply_target, `You have been unqueued from ${queue_row.name}.`);
+    }
+
+  } catch (e) {
+    console.log(`Error enqueueing ${discord_id} to ${queue_name}`);
+    console.log(e.name + ': ' + e.message);
+  }
+}
+
+async function case_enqueue(message, args, flags, guild, member) {
+  const res = enqueue(message.channel, message.author.id, args[0], 0);
+}
+
 async function case_autoqueue(message, args, flags, guild, member) {
   try {
     // Fetch user
@@ -976,8 +1101,10 @@ async function case_autoqueue(message, args, flags, guild, member) {
     db.autoqueues.create().then((new_row) => {
       new_row.setUser(user_row);
       new_row.setQueue(queue_row);
-      return message.channel.send(`Autoqueue for ${args[0]} enabled.`);
+      message.channel.send(`Autoqueue for ${args[0]} enabled.`);
     });
+
+    enqueue(message.channel, message.author.id, args[0], 1);
 
   } catch (e) {
     console.log(e.name);
@@ -1008,16 +1135,23 @@ async function case_title(message, args, flags, guild, member) {
 
 async function case_updaterewards(message, args, flags, guild, member) {
   // Fetch all active reward roles
-  const queue_rows = await db.queues.findAll({
-    attributes: ['name', 'realtime_reward_role', 'custom_reward_role'],
-    where: {expired: 0}
-  });
+  const queue_rows = await dbc.find_all_active_queues();
+  if (queue_rows === null) {
+    reply(message.channel, "No active queues found.");
+    return;
+  }
+
+  // Forces members cache update
+  await guild.members.fetch();
 
   // Remove personal roles from everyone
   for (let i = 0; i < queue_rows.length; i++) {
-    const role_members = guild.roles.cache.get(
-        queue_rows[i].custom_reward_role).members;
-    await role_members.forEach((role_member, id) => {
+    const role = await guild.roles.fetch(queue_rows[i].custom_reward_role);
+    if (role === null) {
+      reply(message.channel, `Role ${queue_rows[i].custom_reward_role} does not exist.`);
+      continue;
+    }
+    await role.members.forEach((role_member, id) => {
       role_member.roles.remove(queue_rows[i].custom_reward_role);
     });
   }
@@ -1026,9 +1160,12 @@ async function case_updaterewards(message, args, flags, guild, member) {
   // Award personal roles to deserving players and message them
   const winners_set = [];
   for (let i = 0; i < queue_rows.length; i++) {
-    const role_members = guild.roles.cache.get(
-        queue_rows[i].realtime_reward_role).members;
-    await role_members.forEach((role_member, id) => {
+    const role = await guild.roles.fetch(queue_rows[i].realtime_reward_role);
+    if (role === null) {
+      reply(message.channel, `Role ${queue_rows[i].realtime_reward_role} does not exist.`);
+      continue;
+    }
+    await role.members.forEach((role_member, id) => {
       if (!winners_set.includes(id)) {
         role_member.roles.add(queue_rows[i].custom_reward_role);
         winners_set.push(id);
@@ -1036,93 +1173,110 @@ async function case_updaterewards(message, args, flags, guild, member) {
     });
   }
   for (let i = 0; i < winners_set.length; i++) {
-    client.users.cache.get(winners_set[i]).send('You have been awarded a personal, ' +
+    client.users.fetch(winners_set[i])
+      .then((user) => {
+        reply(user, 'You have been awarded a personal, ' +
         'customizable role for your outstanding performance in a queue this season. ' +
-        'Please reply with `m!title <Role Name>` to change the name of your role.')
-      .catch((e) => {
-        console.log('Failed to send direct message.');
+        'Please reply with `m!title <Role Name>` to change the name of your role.');
       });
   } 
   console.log('Personal roles awarded');
-  message.channel.send('Finished updating personal roles.');
+  reply(message.channel, 'Finished updating personal roles.');
+
+  // Print top 3 in each queue
+  for (let i = 0; i < queue_rows.length; i++) {
+    const top3 = await dbc.find_top_in_queue(queue_rows[i], 3);
+    if (top3.length === 0) {
+      reply(message.channel, `No rated users found in ${queue_rows[i].name}.`);
+      continue;
+    }
+    const top3_string_builder = [];
+    top3_string_builder.push(queue_rows[i].name);
+    for (let j = 0; j < top3.length; j++) {
+      top3_string_builder.push(`${top3[j][0]}. ${top3[j][1]}`);
+    }
+    top3_string_builder.push('');
+    reply(message.channel, top3_string_builder.join('\n'));
+  }
+  console.log('Finished printing top 3 in each queue');
+}
+
+async function attach_reaction(channel, message_id, emoji) {
+  channel.messages.fetch(message_id)
+    .then(async (message) => {
+      message.react(emoji);
+    }).catch((e) => {
+      console.log('Error attaching reaction to message ' + message_id);
+      console.log(e.name + ': ' + e.message);
+    });
+}
+
+async function reply(target, message) {
+  try {
+    const msg = await target.send(message);
+    return msg.id;
+  } catch (e) {
+    if (target instanceof Discord.User)
+      console.log('Failed to send direct message to ' + target.username);
+    else console.log('Failed to send message in channel');
+  }
 }
 
 async function case_setupqueue(message, args, flags, guild, member) {
-  // Fetch message
-  message.channel.messages.fetch(args[0])
-    .then(async (react_message) => {
-      const required_role = (args.length % 4 === 2) ? args[args.length-1] : null;
-      for (let i = 1; i < args.length-1; i+=4) {
-        // For each reaction, check if queue exists
-        const queue = await db.queues.findOne({
-          where: {lowercase_name: args[i].toLowerCase()}
-        });
-        // If not, create it
-        if (queue === null) {
-          db.queues.create({
-            name: args[i],
-            lowercase_name: args[i].toLowerCase(),
-            expired: 0,
-            message_id: args[0],
-            reaction: args[i+1],
-            realtime_reward_role: args[i+2],
-            custom_reward_role: args[i+3],
-            required_role: required_role
-          });
-        // If found, update it
-        } else {
-          queue.update({
-            message_id: args[0],
-            reaction: args[i+1],
-            realtime_reward_role: args[i+2],
-            custom_reward_role: args[i+3],
-            required_role: required_role
-          });
-        }
-        react_message.react(args[i+1]);
-      }
-    });
+  const required_role = (args.length % 4 === 2) ? args[args.length-1] : null;
+  for (let i = 1; i < args.length-1; i+=4) {
+    // For each reaction
+    dbc.create_queue(args[i], 0, args[0], args[i+1], args[i+2], args[i+3], required_role)
+      .then((queue) => {
+        attach_reaction(message.channel, args[0], args[i+1]);
+      });
+  }
 
-  console.log('Queue setup successful');
+  reply(message.author, 'Queue setup complete.');
+  console.log('Queue setup complete');
 }
 
 async function case_retirequeue(message, args, flags, guild, member) {
-  // Check that queue exists
-  const queue = await db.queues.findOne({
-    where: {name: args[0]}
-  });
-  if (queue === null)
-    return message.channel.send('Requested queue does not exist.');
+  const queue = dbc.retire_queue(args[0]);
+  if (queue === null) reply(reply_target, 'Requested queue does not exist.');
+  else reply(message.channel, `${args[0]} queue retired.`);
+  console.log(`${args[0]} queue retired`);
+}
 
-  // Mark queue as expired
-  queue.update({
-    expired: 1
-  });
+async function case_replacerotation(message, args, flags, guild, member) {
+  // Update rewards and retire old rotation queue
+  await case_updaterewards(message, args, flags, guild, member);
+  const rotation_queue = await dbc.find_rotation_queue();
+  if (rotation_queue === null) reply(message.channel, 'No previous rotation queue found.');
+  else await case_retirequeue(message, [rotation_queue.name], flags, guild, member);
 
-  // Delete all LFM entries
-  const lfm_rows = await db.lfm_users.findAll({
-    include: [{
-      model: db.queues,
-      where: {name: queue.name}
-    }]
-  });
-  lfm_rows.forEach((row) => {
-    row.destroy();
-  });
+  // Delete old messages in rotation-queue channel and print new ones
+  const rotation_channel = await client.channels.fetch(config.rotation_channel);
+  const messages_to_delete = await rotation_channel.messages.fetch({limit: 100});
+  for (const [id, message_to_delete] of messages_to_delete) {
+    await message_to_delete.delete();
+  }
+  await reply(rotation_channel, `This is where you queue for ${args[0]} ladder matches.`);
+  await reply(rotation_channel, `The song difficulty setting for the match is determined by the elo of the players. ` +
+      `If the two players have different elo, the lower elo player chooses between the two difficulty settings.`);
+  await reply(rotation_channel, `> Diamond, Platinum: ${args[2]}`);
+  await reply(rotation_channel, `> Gold: ${args[3]}`);
+  await reply(rotation_channel, `> Silver: ${args[4]}`);
+  await reply(rotation_channel, `> Bronze: ${args[5]}`);
+  await reply(rotation_channel, `Once enough people enter the matchmaking queue, or enough time passes, ` +
+      `the bot will automatically pair players and announce matches to be played in #matchmaking-results.`);
+  await reply(rotation_channel, `React below to enter matchmaking for that queue.`);
+  await reply(rotation_channel, `--------------------------------------------------------------`);
+  const reaction_message_id = await reply(rotation_channel, `QUEUES`);
+  await reply(rotation_channel, `RULES: ${args[6]}`);
 
-  // Delete all autoqueue entries
-  const aq_rows = await db.autoqueues.findAll({
-    include: [{
-      model: db.queues,
-      where: {name: queue.name}
-    }]
-  });
-  aq_rows.forEach((row) => {
-    row.destroy();
-  });
-
-  message.channel.send('Queue retired.');
-  console.log('Queue retired');
+  // Create new queue
+  dbc.create_queue(args[0], 1, reaction_message_id, args[1],
+      config.rotation_realtime_role, config.rotation_custom_role, null)
+    .then((queue) => {
+      attach_reaction(rotation_channel, reaction_message_id, args[1]);
+      if (args.length > 7) dbc.update_special_instructions(queue, args[7]);
+    });
 }
 
 async function case_setuptournament(message, args, flags, guild, member) {
@@ -1164,6 +1318,9 @@ async function case_setmatchmakingrequirements(message, args, flags, guild, memb
 async function case_rawsqlite(message, args, flags, guild, member) {
   db.sequelize.query(args[0]).spread((results, metadata) => {
     const results_string = JSON.stringify(results, null, 2);
+    if (results_string === undefined) {
+      return message.channel.send('Done.');
+    }
     if (results_string.length > 1950) {
       return message.channel.send('Character limit exceeded.');
     }
@@ -1189,7 +1346,7 @@ async function case_printlastmatchmake(message, args, flags, guild, member) {
   message.channel.send(last_edges.toString());
 }
 
-async function case_trymatchmaking(message, args, flags, guild, member) {
+async function try_matchmaking() {
   // Get all active queues
   const queue_rows = await db.queues.findAll({
     where: {expired: 0}
@@ -1200,6 +1357,10 @@ async function case_trymatchmaking(message, args, flags, guild, member) {
     await matchmake(queue_rows[i].name);
     await sleep(2000);
   }
+}
+
+async function case_trymatchmaking(message, args, flags, guild, member) {
+  try_matchmaking();
 }
 
 async function case_changelogs(message, args, flags, guild, member) {
@@ -1510,10 +1671,15 @@ async function leaderboards_print_loop(timer) {
   setTimeout(leaderboards_print_loop, timer - elapsed_time, timer);
 }
 
+async function try_matchmaking_loop() {
+  try_matchmaking();
+  setTimeout(try_matchmaking_loop, config.matchmaking_interval);
+}
+
 // Function for determining top of ladder
 async function update_best_player(queue_id) {
   // Fetch top player of respective queue, tiebroken by games played
-  const guild = client.guilds.cache.get(config.guild_id);
+  const guild = await client.guilds.cache.get(config.guild_id);
 
   // TODO: Figure out how to order by sum of multiple columns in through table
   const top_player_rows = await db.users.findAll({
@@ -1633,8 +1799,8 @@ client.on('message', async (message) => {
   const cmd = args.shift().toLowerCase();
 
   // Fetch guild and guild member
-  const guild = client.guilds.cache.get(config.guild_id);
-  const member = guild.members.cache.get(message.author.id);
+  const guild = await client.guilds.cache.get(config.guild_id);
+  const member = await guild.members.fetch(message.author.id);
 
   console.log(`Command received from ${message.author.username}: ${cmd} ${args[0]}`);
   switch (cmd) {
@@ -1768,6 +1934,14 @@ client.on('message', async (message) => {
       case_oldestmatches(message, args, flags, guild, member);
       break;
 
+    // Queue into a queue via command
+    case 'enqueue': case 'eq':
+      if (args.length !== 1)
+        return message.channel.send(err.number_of_arguments);
+
+      case_enqueue(message, args, flags, guild, member);
+      break;
+
     // Toggles autoqueue status for a specific queue
     case 'autoqueue': case 'aq':
     if (args.length !== 1)
@@ -1794,6 +1968,17 @@ client.on('message', async (message) => {
         return message.channel.send(err.number_of_arguments);
 
       case_updaterewards(message, args, flags, guild, member);
+      break;
+
+    case 'replacerotation':
+      if (message.guild === undefined)
+        return message.channel.send(err.dm_disallowed);
+      if (!member.roles.cache.has(config.admin_role))
+        return message.channel.send(err.insufficient_privilege);
+      if (args.length < 7 || args.length > 8)
+        return message.channel.send(err.number_of_arguments);
+
+      case_replacerotation(message, args, flags, guild, member);
       break;
 
     // Adds reactions and creates/associates queues
@@ -1945,19 +2130,31 @@ async function make_match(user1, elo1, user2, elo2) {
     rank1: rank1,
     rank2: rank2,
     timestamp: db.sequelize.literal('CURRENT_TIMESTAMP')
-  }).then((match) => {
+  }).then(async (match) => {
     match.setUser1(user1.user);
     match.setUser2(user2.user);
     match.setQueue(user1.queue);
 
     // Notify matchmade players
+    let extra = '';
+    if (user1.queue.special_instructions !== null) {
+      switch (user1.queue.special_instructions) {
+        case 'roll from tags100 list':
+          extra = ' Tag: ';
+          extra += lists.tags100[Math.floor(Math.random() * lists.tags100.length)];
+          break;
+
+        default:
+          console.log('Special Instructions case not found');
+      }
+    }
+    const user1obj = await client.users.fetch(user1.user.discord_id);
+    const user2obj = await client.users.fetch(user2.user.discord_id);
     client.channels.cache.get(config.match_channel).send(
         `Match ID# \`${match.id.toString().padStart(6)}\` - ` +
-        `Queue \`${user1.queue.name.padEnd(16)}\`:` +
-        `${client.users.cache.get(user1.user.discord_id)} ` +
-        `${user1.user.amq_name} (${rank1}) vs. ` +
-        `${client.users.cache.get(user2.user.discord_id)} ` +
-        `${user2.user.amq_name} (${rank2})`);
+        `Queue \`${user1.queue.name.padEnd(16)}\`: ` +
+        `${user1obj} ${user1.user.amq_name} (${rank1}) vs. ` +
+        `${user2obj} ${user2.user.amq_name} (${rank2})` + extra);
 
     // Delete LFM rows for matchmade players
     user1.destroy();
@@ -2196,58 +2393,7 @@ async function requeue_autoqueue(queue_name) {
     }]
   }).then(async (rows) => {
     rows.forEach(async (row) => {
-
-      // Check if already queued
-      const lfm_row = await db.lfm_users.findOne({
-        include: [{
-          model: db.users,
-          where: {
-            id: row.user.id
-          }
-        }, {
-          model: db.queues,
-          where: {
-            id: row.queue.id
-          }
-        }]
-      });
-
-      // Check that number of pending matches less than 5
-      const match_count = await db.matches.count({
-        where: {
-          [db.Sequelize.Op.or]: [
-            {'$user1.id$': row.user.id},
-            {'$user2.id$': row.user.id}
-          ],
-          result: 'PENDING'
-        },
-        include: [{
-          model: db.users,
-          as: 'user1'
-        }, {
-          model: db.users,
-          as: 'user2'
-        }, {
-          model: db.queues,
-          where: {
-            id: row.queue.id
-          }
-        }]
-      });
-      if (match_count >= 5) {
-        return;
-      }
-
-      // If not, create entry
-      if (!lfm_row) {
-        db.lfm_users.create({
-          timestamp: db.sequelize.literal('CURRENT_TIMESTAMP')
-        }).then((lfm_user) => {
-          lfm_user.setUser(row.user);
-          lfm_user.setQueue(row.queue);
-        });
-        console.log(`${row.user.amq_name} autoqueued to ${row.queue.name}`);
-      }
+      enqueue(null, row.user.id, row.queue.name, 1);
     });
 
   }).catch((e) => {
@@ -2268,103 +2414,10 @@ async function handle_queue_reaction(reaction, user) {
     }
   });
   if (queue === null) return;
-  console.log('Queue reaction detected');
+  console.log('Queue reaction detected for ' + queue.name);
   reaction.users.remove(user);
 
-  // Verify that user has necessary role
-  if (queue.required_role !== null) {
-    const guild = client.guilds.cache.get(config.guild_id);
-    const member = guild.members.cache.get(user.id);
-    if (!member.roles.cache.has(queue.required_role)) {
-      user.send('Your list must be approved first before playing in this queue.')
-        .catch((e) => {
-          console.log('Failed to send direct message.');
-        });
-      user.send('Please request approval with `m!registerlist <List URL>` ' +
-          'if you have not already done so.')
-        .catch((e) => {
-          console.log('Failed to send direct message.');
-        });
-      return;
-    }
-  }
-
-  // Check that number of pending matches less than 5
-  const match_count = await db.matches.count({
-    where: {
-      [db.Sequelize.Op.or]: [
-        {'$user1.discord_id$': user.id},
-        {'$user2.discord_id$': user.id}
-      ],
-      result: 'PENDING'
-    },
-    include: [{
-      model: db.users,
-      as: 'user1'
-    }, {
-      model: db.users,
-      as: 'user2'
-    }, {
-      model: db.queues,
-      where: {
-        name: queue.name
-      }
-    }]
-  });
-  if (match_count >= 5)
-    return user.send('You already have 5 matches to play in this queue.')
-        .catch((e) => {
-          console.log('Failed to send direct message.');
-        });
-
-  // Check if already queued
-  const lfm_row = await db.lfm_users.findOne({
-    include: [{
-      model: db.users,
-      where: {
-        discord_id: user.id
-      }
-    }, {
-      model: db.queues,
-      where: {
-        name: queue.name
-      }
-    }]
-  });
-  // If not, create queue entry
-  if (lfm_row === null) {
-    const user_row = await db.users.findOne({where: {discord_id: user.id}});
-    if (user_row === null) {
-      user.send('You have not registered yet.')
-        .catch((e) => {
-          console.log('Failed to send direct message.');
-        });
-      user.send('Please reply with `m!register <AMQ Username>` in order to register.')
-        .catch((e) => {
-          console.log('Failed to send direct message.');
-        });
-      return;
-    }
-    db.lfm_users.create({
-      timestamp: db.sequelize.literal('CURRENT_TIMESTAMP'),
-    }).then((lfm_user) => {
-      lfm_user.setUser(user_row);
-      lfm_user.setQueue(queue);
-    });
-  // If already queued, delete queue entry
-  } else lfm_row.destroy();
-  if (lfm_row === null) {
-    for (let i = 0; i < config.matchmaking_requirements.length; i+=2) {
-      setTimeout(matchmake, config.matchmaking_requirements[i+1] + 10000, queue.name);
-    }
-  }
-  console.log(`${user.username} ${lfm_row === null ? 'queued to' : 'unqueued from'} `+
-      `"${queue.name}"`);
-  user.send(`You have been ${lfm_row === null ? 'queued to' : 'unqueued from'} ` +
-      `"${queue.name}".`
-  ).catch((e) => {
-    console.log('Failed to send direct message.');
-  });
+  enqueue(user, user.id, queue.name, 0);
 }
 
 // Reaction to confirm a match result

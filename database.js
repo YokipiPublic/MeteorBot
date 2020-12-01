@@ -44,6 +44,10 @@ db.users = sequelize.define('users', {
     type: Sequelize.BOOLEAN,
     defaultValue: '0',
   },
+  inactive: {
+    type: Sequelize.BOOLEAN,
+    defaultValue: '0',
+  },
 }, {
   underscored: true,
 });
@@ -60,6 +64,13 @@ db.queues = sequelize.define('queues', {
   expired: {
     type: Sequelize.BOOLEAN,
     defaultValue: '0',
+  },
+  rotation: {
+    type: Sequelize.BOOLEAN,
+    defaultValue: '0',
+  },
+  special_instructions: {
+    type: Sequelize.STRING,
   },
   message_id: {
     type: Sequelize.STRING,
@@ -167,6 +178,10 @@ db.user_ratings = sequelize.define('user_ratings', {
     type: Sequelize.INTEGER,
     defaultValue: '1500',
   },
+  rank: {
+    type: Sequelize.STRING,
+    defaultValue: 'Unranked',
+  }
 }, {
   underscored: true,
 });

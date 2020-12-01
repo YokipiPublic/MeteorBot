@@ -13,6 +13,9 @@
   "approvals_channel": "717429312248086528",
   "leaderboards_channel": "727787684604674078",
   "help_channel": "709507173473845318",
+  "rotation_channel": "719732043067687002",
+  "rotation_realtime_role": "724115682614313032",
+  "rotation_custom_role": "724115728260661269",
   "leaderboards_print_interval": 3600000,
   "placement_games": 10,
   "stable_k": 30,
@@ -26,5 +29,6 @@
     20,
     0
   ],
+  "matchmaking_interval": 600000,
   "changelogs_file": "CHANGELOG.md"
 }

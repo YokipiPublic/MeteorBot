@@ -1,0 +1,8 @@
+'use strict';
+
+const lists = {};
+
+lists.tags200 = ["Demons", "Harem", "Historical", "Kids", "Magic", "Military", "Parody", "Swordplay", "School", "Seinen", "Shoujo", "Shounen", "Super Power", "Male Protagonist", "Tragedy", "Primarily Female Cast", "Primarily Male Cast", "Cute Girls Doing Cute Things", "Female Protagonist", "Henshin", "Nudity", "Coming of Age", "Ensemble Cast", "Primarily Adult Cast", "War", "Idol", "Love Triangle", "Aliens", "Episodic", "Foreign", "Isekai", "Surreal Comedy", "Urban Fantasy"];
+lists.tags100 = ["Demons", "Harem", "Historical", "Kids", "Magic", "Military", "Parody", "Police", "Swordplay", "School", "Seinen", "Shoujo", "Shounen", "Super Power", "Yaoi", "Yuri", "Iyashikei", "Male Protagonist", "Slapstick", "School Club", "Tragedy", "Primarily Female Cast", "Family Life", "Primarily Male Cast", "Full CGI", "CGI", "Cute Girls Doing Cute Things", "Post-Apocalyptic", "Gore", "Time Manipulation", "Female Protagonist", "Henshin", "Nudity", "Coming of Age", "Politics", "Anti-Hero", "Ensemble Cast", "Primarily Adult Cast", "War", "Idol", "Love Triangle", "Meta", "Work", "Alternate Universe", "Guns", "Super Robot", "Real Robot", "Tsundere", "Robots", "Card Battle", "Aliens", "Episodic", "Foreign", "Youkai", "Amnesia", "Isekai", "Rural", "Revenge", "Gods", "Surreal Comedy", "Urban Fantasy", "Philosophy", "Animals", "Primarily Child Cast", "Detective"];
+
+module.exports = lists;
