@@ -17,6 +17,8 @@
   "rotation_realtime_role": "724115682614313032",
   "rotation_custom_role": "724115728260661269",
   "leaderboards_print_interval": 3600000,
+  "autoabort_check_interval": 86400000,
+  "autoabort_threshold": 7,
   "placement_games": 10,
   "stable_k": 30,
   "placement_k": 50,

@@ -12,6 +12,7 @@
     "dotenv": "^8.2.0",
     "edmonds-blossom": "^1.0.0",
     "forever": "^3.0.0",
+    "openode": "^2.0.40",
     "pg": "^8.3.0",
     "sequelize": "^5.21.11",
     "sqlite3": "^5.0.0"

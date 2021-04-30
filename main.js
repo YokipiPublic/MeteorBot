@@ -1,5 +1,6 @@
 'use strict';
 
+//const logger = require('./logger.js');
 const Discord = require('discord.js');
 const db = require('./database.js');
 const err = require('./error_messages.js');
@@ -45,6 +46,9 @@ client.once('ready', () => {
 
   // Start periodic matchmaking attempts
   try_matchmaking_loop();
+
+  // Start autoabort loop
+  autoabort_check_loop();
 });
 
 // Following are case-functions for bot-commands in main loop
@@ -166,7 +170,8 @@ async function case_rejectlist(message, args, flags, guild, member) {
 
   // If user not found via AMQ name
   if (!user) {
-    return message.channel.send('User with AMQ name given not found.');
+    message.channel.send('User with AMQ name given not found.');
+    return;
   }
 
   // Send message to requester
@@ -291,7 +296,10 @@ async function case_result(message, args, flags, guild, member) {
       model: db.queues
     }]
   });
-  if (match === null) return message.channel.send(`Match with ID ${args[0]} not found.`);
+  if (match === null) {
+    message.channel.send(`Match with ID ${args[0]} not found.`);
+    return;
+  }
 
   // Fetch players
   // TODO: Wait, there's no way this is necessary
@@ -423,6 +431,7 @@ async function case_leaderboard(message, args, flags, guild, member) {
   // Total Games
   if (args[0].toLowerCase() === 'total games') {
     const user_rows = await db.users.findAll({
+      where: {banned : 0},
       include: [{
         model: db.queues,
         through: {
@@ -771,7 +780,7 @@ async function case_pending(message, args, flags, guild, member) {
         match_string = match_string.concat('No Deadline Set');
       } else {
         const deadline_date = new Date(match_rows[i].timestamp);
-        deadline_date.setDate(deadline_date.getDate() + 7);
+        deadline_date.setDate(deadline_date.getDate() + config.autoabort_threshold);
         match_string = match_string.concat(
             `${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
       }
@@ -904,7 +913,8 @@ async function case_oldestmatches(message, args, flags, guild, member) {
   });
   // If there are no pending matches
   if (match_rows.length < 1) {
-    return channel.send('There are currently no pending matches. Congratulations?');
+    channel.send('There are currently no pending matches. Congratulations?');
+    return;
   }
 
   // Build list of pending matches
@@ -919,7 +929,7 @@ async function case_oldestmatches(message, args, flags, guild, member) {
       match_string = match_string.concat('No Deadline Set');
     } else {
       const deadline_date = new Date(match_rows[i].timestamp);
-      deadline_date.setDate(deadline_date.getDate() + 7);
+      deadline_date.setDate(deadline_date.getDate() + config.autoabort_threshold);
       match_string = match_string.concat(
           `${deadline_date.toLocaleString('en-GB', {timeZone: 'UTC'})}`);
     }
@@ -1094,17 +1104,19 @@ async function case_autoqueue(message, args, flags, guild, member) {
     // If so, delete it
     if (aq_row) {
       aq_row.destroy();
-      return message.channel.send(`Autoqueue for ${args[0]} disabled.`);
-    }
+      message.channel.send(`Autoqueue for ${args[0]} disabled.`);
+      return;
 
     // Else, create a new autoqueue entry
-    db.autoqueues.create().then((new_row) => {
-      new_row.setUser(user_row);
-      new_row.setQueue(queue_row);
-      message.channel.send(`Autoqueue for ${args[0]} enabled.`);
-    });
+    } else {
+      db.autoqueues.create().then((new_row) => {
+        new_row.setUser(user_row);
+        new_row.setQueue(queue_row);
+        message.channel.send(`Autoqueue for ${args[0]} enabled.`);
+      });
 
-    enqueue(message.channel, message.author.id, args[0], 1);
+      enqueue(message.channel, message.author.id, args[0], 1);
+    }
 
   } catch (e) {
     console.log(e.name);
@@ -1196,7 +1208,7 @@ async function case_updaterewards(message, args, flags, guild, member) {
       top3_string_builder.push(`${top3[j][0]}. ${top3[j][1]}`);
     }
     top3_string_builder.push('');
-    reply(message.channel, top3_string_builder.join('\n'));
+    await reply(message.channel, top3_string_builder.join('\n'));
   }
   console.log('Finished printing top 3 in each queue');
 }
@@ -1256,7 +1268,7 @@ async function case_replacerotation(message, args, flags, guild, member) {
   for (const [id, message_to_delete] of messages_to_delete) {
     await message_to_delete.delete();
   }
-  await reply(rotation_channel, `This is where you queue for ${args[0]} ladder matches.`);
+  await reply(rotation_channel, `This is where you queue for **${args[0]}** ladder matches.`);
   await reply(rotation_channel, `The song difficulty setting for the match is determined by the elo of the players. ` +
       `If the two players have different elo, the lower elo player chooses between the two difficulty settings.`);
   await reply(rotation_channel, `> Diamond, Platinum: ${args[2]}`);
@@ -1264,11 +1276,11 @@ async function case_replacerotation(message, args, flags, guild, member) {
   await reply(rotation_channel, `> Silver: ${args[4]}`);
   await reply(rotation_channel, `> Bronze: ${args[5]}`);
   await reply(rotation_channel, `Once enough people enter the matchmaking queue, or enough time passes, ` +
-      `the bot will automatically pair players and announce matches to be played in #matchmaking-results.`);
+      `the bot will automatically pair players and announce matches to be played in <#${config.match_channel}>.`);
   await reply(rotation_channel, `React below to enter matchmaking for that queue.`);
   await reply(rotation_channel, `--------------------------------------------------------------`);
-  const reaction_message_id = await reply(rotation_channel, `QUEUES`);
-  await reply(rotation_channel, `RULES: ${args[6]}`);
+  const reaction_message_id = await reply(rotation_channel, `**QUEUES**`);
+  await reply(rotation_channel, `**RULES**: ${args[6]}`);
 
   // Create new queue
   dbc.create_queue(args[0], 1, reaction_message_id, args[1],
@@ -1357,6 +1369,64 @@ async function try_matchmaking() {
     await matchmake(queue_rows[i].name);
     await sleep(2000);
   }
+}
+
+async function autoabort_check() {
+  // Fetch all pending matches
+  const match_rows = await db.matches.findAll({
+    where: {
+      result: 'PENDING',
+    },
+    include: [{
+      model: db.users,
+      as: 'user1'
+    }, {
+      model: db.users,
+      as: 'user2'
+    }, {
+      model: db.queues
+    }],
+    order: [
+      ['timestamp', 'ASC']
+    ]
+  });
+
+  // Iterate through pending matches until no more matches are past deadline
+  for (let i = 0; i < match_rows.length; i++) {
+    const time_elapsed = new Date().getTime() - new Date(match_rows[i].timestamp).getTime();
+    // If time elapsed past threshold, update match to abort status
+    if (time_elapsed > config.autoabort_threshold * 86400000) {
+      const match = match_rows[i];
+      match.update({
+        result: 'ABORT',
+        rating_change1: 0,
+        rating_change2: 0
+      });
+
+      const user1 = await db.users.findOne({
+        where: {id: match.user1.id},
+        include: [{
+          model: db.queues,
+          where: {name: match.queue.name},
+        }]
+      });
+      const user2 = await db.users.findOne({
+        where: {id: match.user2.id},
+        include: [{
+          model: db.queues,
+          where: {name: match.queue.name},
+        }]
+      });
+
+      user1.queues[0].user_ratings.aborts += 1;
+      user1.queues[0].user_ratings.save();
+      user2.queues[0].user_ratings.aborts += 1;
+      user2.queues[0].user_ratings.save();
+
+      console.log(`Match ${match.id} autoaborted`);
+    } else break;
+  }
+  console.log('Finished checking for autoabortable matches');
 }
 
 async function case_trymatchmaking(message, args, flags, guild, member) {
@@ -1644,7 +1714,7 @@ async function leaderboards_print_loop(timer) {
 
   // Get channel and clear messages
   const channel = client.channels.cache.get(config.leaderboards_channel);
-  channel.messages.fetch().then(async (msgs) => {
+  channel.messages.fetch({limit: 100}).then(async (msgs) => {
     channel.bulkDelete(msgs);
 
     // Get all active queues
@@ -1676,6 +1746,11 @@ async function try_matchmaking_loop() {
   setTimeout(try_matchmaking_loop, config.matchmaking_interval);
 }
 
+async function autoabort_check_loop() {
+  autoabort_check();
+  setTimeout(autoabort_check_loop, config.autoabort_check_interval);
+}
+
 // Function for determining top of ladder
 async function update_best_player(queue_id) {
   // Fetch top player of respective queue, tiebroken by games played
@@ -1683,6 +1758,10 @@ async function update_best_player(queue_id) {
 
   // TODO: Figure out how to order by sum of multiple columns in through table
   const top_player_rows = await db.users.findAll({
+    where: {
+      banned: 0,
+      inactive: 0
+    },
     include: [{
       model: db.queues,
       where: {id: queue_id},
@@ -1720,23 +1799,17 @@ async function update_best_player(queue_id) {
     }
   }
 
-  // TEMP
-  console.log(top_player_id);
-  console.log(top_player_rating);
-  console.log(top_player_total_games);
-
   // Check current owner of top player role
   const role_members = guild.roles.cache.get(
       top_player_rows[0].queues[0].realtime_reward_role).members;
   // If no one has the role yet
   if (role_members.size === 0) {
-    const top_player_member = guild.members.cache.get(top_player_id);
+    const top_player_member = await guild.members.fetch(top_player_id);
     top_player_member.roles.add(top_player_rows[0].queues[0].realtime_reward_role);
     console.log(`Top player of ${top_player_rows[0].queues[0].name} ` +
           `changed to ${top_player_member.user.username}`);
   // Else
   } else {
-    console.log(role_members[0]); // TEMP
     role_members.forEach(async (role_member, id) => {
       const player_row = await db.users.findOne({
         where: {discord_id: id},
@@ -1755,7 +1828,6 @@ async function update_best_player(queue_id) {
         return;
       }
 
-      console.log(player_row.amq_name); // TEMP
       // If not tied with the current top player, replace title
       // Note that there is NOT a redundancy check here since we use OR and strictly LT
       if (player_row.queues[0].user_ratings.rating < top_player_rating ||
@@ -1802,7 +1874,7 @@ client.on('message', async (message) => {
   const guild = await client.guilds.cache.get(config.guild_id);
   const member = await guild.members.fetch(message.author.id);
 
-  console.log(`Command received from ${message.author.username}: ${cmd} ${args[0]}`);
+  console.log(`Command received from ${message.author.username} (${message.author.id}): ${cmd} ${args[0]}`);
   switch (cmd) {
 
     // Used to register for ladder and bind AMQ name
@@ -2157,9 +2229,9 @@ async function make_match(user1, elo1, user2, elo2) {
         `${user2obj} ${user2.user.amq_name} (${rank2})` + extra);
 
     // Delete LFM rows for matchmade players
+    console.log(`Match ${match.id} created successfully`);
     user1.destroy();
     user2.destroy();
-    console.log('Match creation successful');
 
   }).catch((e) => {
     console.error(e);
@@ -2176,7 +2248,7 @@ let last_edges = [];
 // Matchmaker function
 async function matchmake(queue_name) {
   // Check and acquire lock
-  console.log('Running matchmaker function');
+  console.log(`Running matchmaker function for ${queue_name}`);
   if (matchmaker_locks[queue_name]) {
     console.log(`Matchmaker currently locked for ${queue_name}`);
     return;
@@ -2213,7 +2285,7 @@ async function matchmake(queue_name) {
       matchmakeable = false;
     }
     if (!matchmakeable) {
-      console.log('Matchmaking conditions not met');
+      console.log(`Matchmaking conditions not met for ${queue_name}`);
       return;
     }
 
@@ -2393,7 +2465,7 @@ async function requeue_autoqueue(queue_name) {
     }]
   }).then(async (rows) => {
     rows.forEach(async (row) => {
-      enqueue(null, row.user.id, row.queue.name, 1);
+      enqueue(null, row.user.discord_id, row.queue.name, 1);
     });
 
   }).catch((e) => {

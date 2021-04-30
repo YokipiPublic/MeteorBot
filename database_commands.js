@@ -90,7 +90,10 @@ dbc.retire_queue = async function (name) {
 dbc.find_rotation_queue = async function () {
   try {
     const queue = await db.queues.findOne({
-      where: {rotation: 1}
+      where: {
+        rotation: 1,
+        expired: 0
+      }
     });
 
     return queue;
